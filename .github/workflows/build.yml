@@ -55,9 +55,11 @@ jobs:
         working-directory: zephyrproject
         run: |
           cd zephyr
+          git fetch origin 5d36e85b99a --depth=1
           git cherry-pick --no-commit 5d36e85b99a || true
 
           cd ../modules/hal/rpi_pico
+          git fetch origin 5d7744c --depth=1
           git cherry-pick --no-commit 5d7744c || true
 
       - name: Build firmware
