@@ -385,7 +385,7 @@ static void cmd_help(void)
 	wifi_cmd_send(
 		"$HELP:Commands:\n"
 		"$L: $PING $GET $SET:<k>=<v>,... $SAVE $LOAD $RST\n"
-		"$L: $START $STOP $STATUS $BAT\n"
+		"$L: $START $STOP $MONITOR $STATUS $BAT\n"
 		"$L: $DRV:<steer>,<speed> $DRVEN $DRVOFF\n"
 		"$L: $SRV:<angle> $ESC:<us>\n"
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
@@ -422,8 +422,12 @@ static void dispatch_command(const char *line)
 		control_cmd_start();
 	} else if (strcmp(line, "$STOP") == 0) {
 		control_cmd_stop();
+	} else if (strcmp(line, "$MONITOR") == 0) {
+		control_cmd_monitor();
 	} else if (strcmp(line, "$STATUS") == 0) {
-		wifi_cmd_printf("$STS:%s\n", control_is_running() ? "RUN" : "STOP");
+		wifi_cmd_printf("$STS:%s\n",
+			control_is_running() ? "RUN" :
+			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
 	} else if (strncmp(line, "$TEST:", 6) == 0) {

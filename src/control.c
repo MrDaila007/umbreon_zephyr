@@ -34,6 +34,7 @@ static struct k_thread control_thread_data;
 static volatile bool car_running;
 static volatile bool manual_mode;
 static volatile bool drv_enabled;
+static volatile bool monitor_mode;
 static volatile int manual_steer;
 static volatile float manual_speed;
 static volatile int64_t last_drv_ms;
@@ -227,6 +228,45 @@ static void work(void)
 	}
 }
 
+/* ─── work_monitor() — diagnostic mode: sensors + servo, no motor ─────────── */
+
+static void work_monitor(void)
+{
+	int *s = sensors_poll();
+	imu_update();
+
+	/* ── Steering (same wall-follow logic as work()) ──────────────── */
+	int diff;
+
+	if (s[IDX_LEFT] > cfg.side_open_dist && s[IDX_RIGHT] > cfg.side_open_dist) {
+		diff = WALL_FOLLOW_BIAS;
+	} else {
+		diff = s[IDX_RIGHT] - s[IDX_LEFT];
+	}
+
+	bool all_close = true;
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		if (s[i] >= cfg.all_close_dist) {
+			all_close = false;
+			break;
+		}
+	}
+	if (all_close) {
+		diff = WALL_FOLLOW_BIAS;
+	}
+
+	/* Hard-side blend */
+	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
+
+	/* Use clear coefficients for steering */
+	int steer_val = (int)(diff * cfg.coe_clear);
+	car_write_steer(steer_val);
+
+	/* No motor — no speed, no PID, no stuck/wrong-dir detection */
+
+	send_telemetry(s, steer_val, 0.0f);
+}
+
 /* ─── Control thread ──────────────────────────────────────────────────────── */
 
 static void control_thread(void *p1, void *p2, void *p3)
@@ -255,7 +295,10 @@ static void control_thread(void *p1, void *p2, void *p3)
 		bool drv_active = drv_enabled && manual_mode &&
 				  (k_uptime_get() - last_drv_ms < 500);
 
-		if (car_running && !drv_active) {
+		if (monitor_mode && !car_running) {
+			/* Diagnostic monitor mode */
+			work_monitor();
+		} else if (car_running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;
 			work();
@@ -335,9 +378,23 @@ void control_cmd_start(void)
 	wifi_cmd_send("$STS:RUN\n");
 }
 
+void control_cmd_monitor(void)
+{
+	imu_reset_heading();
+	monitor_mode = true;
+	wifi_cmd_send("$ACK\n");
+	wifi_cmd_send("$STS:MONITOR\n");
+}
+
+bool control_is_monitor(void)
+{
+	return monitor_mode;
+}
+
 void control_cmd_stop(void)
 {
 	car_running = false;
+	monitor_mode = false;
 	display_notify_run_state(false);
 	drv_enabled = false;
 	manual_mode = false;
