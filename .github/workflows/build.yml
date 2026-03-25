@@ -55,12 +55,10 @@ jobs:
         working-directory: zephyrproject
         run: |
           cd zephyr
-          git fetch origin 5d36e85b99a --depth=1
-          git cherry-pick --no-commit 5d36e85b99a || true
+          curl -sL https://github.com/zephyrproject-rtos/zephyr/commit/5d36e85b99a.patch | git apply --3way || true
 
           cd ../modules/hal/rpi_pico
-          git fetch origin 5d7744c --depth=1
-          git cherry-pick --no-commit 5d7744c || true
+          curl -sL https://github.com/zephyrproject-rtos/hal_rpi_pico/commit/5d7744c.patch | git apply --3way || true
 
       - name: Build firmware
         working-directory: zephyrproject
