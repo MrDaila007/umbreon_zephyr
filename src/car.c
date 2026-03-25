@@ -27,7 +27,7 @@ static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;
 static float pid_integral;
-static float pid_prev_error;
+static float pid_prev_filtered;  /* for derivative-on-measurement */
 static float pid_filtered;
 static uint32_t pid_prev_cnt;
 static int64_t pid_prev_ms;
@@ -135,7 +135,7 @@ void car_write_speed_ms(float target)
 void car_pid_reset(void)
 {
 	pid_integral = 0;
-	pid_prev_error = 0;
+	pid_prev_filtered = 0;
 	pid_filtered = 0;
 	pid_prev_cnt = 0;
 	pid_prev_ms = 0;
@@ -173,12 +173,12 @@ void car_pid_control(void)
 		pid_filtered = 0;
 	}
 
-	/* PID */
+	/* PID — derivative on measurement (no kick on target change) */
 	float error = target_speed - pid_filtered;
 	pid_integral += error * dt;
 	pid_integral = CLAMP(pid_integral, -50.0f, 50.0f);
-	float deriv = (error - pid_prev_error) / dt;
-	pid_prev_error = error;
+	float deriv = -(pid_filtered - pid_prev_filtered) / dt;
+	pid_prev_filtered = pid_filtered;
 
 	/* Feedforward: jump past motor dead zone */
 	float ff = (target_speed > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;

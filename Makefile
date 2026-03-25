@@ -8,12 +8,17 @@ MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
 BAUD         ?= 115200
 
-.PHONY: build flash monitor clean test test-host test-ztest
+.PHONY: build build-usb flash monitor clean test test-host test-ztest
 
 build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
 	west build -b $(BOARD) $(SRC_DIR) --pristine always
+
+build-usb:
+	source $(ZEPHYR_DIR)/.venv/bin/activate && \
+	cd $(ZEPHYR_DIR) && \
+	west build -b $(BOARD) $(SRC_DIR) --pristine always -- -DUSB_CONSOLE=ON
 
 flash:
 	cp $(BUILD_DIR)/zephyr/zephyr.uf2 $(MOUNT_POINT)/

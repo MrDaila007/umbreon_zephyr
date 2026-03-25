@@ -19,6 +19,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
 
@@ -42,6 +43,10 @@ static volatile int64_t last_drv_ms;
 /* Stuck detection (persistent across work() calls) */
 static int stuck_time;
 static float turns;
+
+/* ─── Heartbeat LED ──────────────────────────────────────────────────────── */
+static const struct gpio_dt_spec heartbeat_led =
+	GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
 /* ─── Wall follow bias ────────────────────────────────────────────────────── */
 #define WALL_FOLLOW_BIAS 800
@@ -281,6 +286,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 	while (1) {
 		wdt_feed_kick();
+		gpio_pin_toggle_dt(&heartbeat_led);
 
 		int64_t now = k_uptime_get();
 		if (now < next_loop) {
@@ -343,6 +349,10 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 void control_init(void)
 {
+	if (gpio_is_ready_dt(&heartbeat_led)) {
+		gpio_pin_configure_dt(&heartbeat_led, GPIO_OUTPUT_INACTIVE);
+	}
+
 	k_thread_create(&control_thread_data, control_stack,
 			K_THREAD_STACK_SIZEOF(control_stack),
 			control_thread, NULL, NULL, NULL,
