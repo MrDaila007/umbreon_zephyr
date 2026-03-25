@@ -175,17 +175,6 @@ CSV stream at ~25 Hz:
 | CAL | ESC calibration done | 0 |
 | BEN/BML/BLV | Battery: enabled/multiplier/low threshold (V) | 1/2.8/6.0 |
 
-## TODO — Not yet ported from Arduino
+## TODO
 
-### Major
-
-- [ ] **OLED menu + rotary encoder** — 10-screen state machine (dashboard, settings, tests, info) on SSD1306 128×64. Arduino: `menu.h` (943 lines). No display driver or encoder handling in Zephyr yet
-- [ ] **Dual-core (Core 1)** — Arduino uses Core 1 for OLED/encoder (`core1.h`, `setup1()`/`loop1()`). Zephyr runs everything as threads on a single core, second RP2350 core is idle
-- [ ] **TF-Luna 4× LiDAR** — 4 UART lidars via SerialPIO (`luna_car.h`). Zephyr only supports 6× VL53L0X, no flexible sensor selection
-
-### Minor
-
-- [ ] **Compile-time sensor config** — Arduino: `sensor_config.h` allows switching between 4×Luna and 6×VL53L0X via `SENSOR_CONFIG`. Zephyr hardcodes 6× VL53L0X
-- [ ] **Competition mode** — Auto-start flag without menu/WiFi for races
-- [ ] **I2C bus recovery (bit-bang)** — Manual I2C1 bus recovery via SCL toggling. Zephyr uses `i2c_recover_bus()` (less reliable)
-- [ ] **Battery sustained low-voltage cutoff** — Arduino cuts motor after 10 seconds of sustained low voltage. Zephyr only does a one-shot check
+See [docs/TODO.md](docs/TODO.md) for the full backlog.
