@@ -4,8 +4,8 @@
  * Pin assignment:
  *   I2C0  GP0/GP1  400kHz — MPU-6050 (0x68)
  *   I2C1  GP2/GP3  100kHz — 6× VL53L0X (0x30–0x35)
- *   UART0 GP16/GP17 115200 — WiFi bridge (ESP8266)
- *     (GP16/17 are UART0 in RP2350 pinmux — Arduino Serial1 maps to UART0)
+ *   UART0 GP16/GP17 115200 — Debug console
+ *   UART1 GP4/GP5   115200 — WiFi bridge (ESP8266)
  *   PWM   GP10 (slice 5A) — Steering servo
  *   PWM   GP11 (slice 5B) — Motor ESC
  *   GPIO  GP13 — Tachometer interrupt (RISING)
@@ -17,10 +17,9 @@
 #include <zephyr/dt-bindings/i2c/i2c.h>
 
 / {
-	/* Remove uart0 from console — we use it for WiFi bridge */
 	chosen {
-		/delete-property/ zephyr,console;
-		/delete-property/ zephyr,shell-uart;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
 		zephyr,flash-controller = &qmi;
 	};
 
@@ -63,7 +62,7 @@
 	};
 };
 
-/* Override UART0 pins: GP16 (TX), GP17 (RX) — for WiFi bridge */
+/* UART0 pins: GP16 (TX), GP17 (RX) — debug console */
 &uart0_default {
 	group1 {
 		pinmux = <UART0_TX_P16>;
@@ -71,6 +70,19 @@
 	group2 {
 		pinmux = <UART0_RX_P17>;
 		input-enable;
+	};
+};
+
+/* UART1 pins: GP4 (TX), GP5 (RX) — WiFi bridge (ESP8266) */
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <UART1_TX_P4>;
+		};
+		group2 {
+			pinmux = <UART1_RX_P5>;
+			input-enable;
+		};
 	};
 };
 
@@ -138,10 +150,18 @@
 	};
 };
 
-/* ─── UART0: WiFi bridge (GP16 TX, GP17 RX) ──────────────────────────────── */
+/* ─── UART0: Debug console (GP16 TX, GP17 RX) ────────────────────────────── */
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;
+};
+
+/* ─── UART1: WiFi bridge (GP4 TX, GP5 RX) ────────────────────────────────── */
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
 };
 
 /* ─── PWM: Servo (GP10) + ESC (GP11) ─────────────────────────────────────── */

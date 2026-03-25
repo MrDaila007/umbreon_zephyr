@@ -9,7 +9,8 @@ Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 
 |-----------|-----------|------|
 | 6x VL53L0X ToF | I2C1 100kHz | SDA=GP2, SCL=GP3, XSHUT=GP6-9,14,15 |
 | MPU-6050 IMU | I2C0 400kHz | SDA=GP0, SCL=GP1 |
-| ESP8266 WiFi | UART0 115200 | TX=GP16, RX=GP17 |
+| ESP8266 WiFi | UART1 115200 | TX=GP4, RX=GP5 |
+| Debug console | UART0 115200 | TX=GP16, RX=GP17 |
 | Servo (steering) | PWM slice 5A | GP10 |
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |
@@ -80,7 +81,7 @@ cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/
 | `imu.c/h` | MPU-6050 gyro Z, calibration, heading integration |
 | `tachometer.c/h` | GPIO ISR, speed calculation |
 | `control.c/h` | Main control loop: wall-follow, stuck detection |
-| `wifi_cmd.c/h` | UART0 command protocol + debug console |
+| `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge) |
 | `settings.c/h` | NVS storage for 31 configurable parameters |
 | `battery.c/h` | ADC monitoring, low-voltage cutoff |
 | `tests.c/h` | 8 diagnostic test routines |
@@ -88,7 +89,7 @@ cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/
 
 ## WiFi Protocol
 
-All commands are ASCII over UART0 (ESP8266 bridge), prefixed with `$`, terminated with `\n`.
+All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, terminated with `\n`.
 
 ### Control
 

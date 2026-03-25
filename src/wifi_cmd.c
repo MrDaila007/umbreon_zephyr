@@ -1,12 +1,13 @@
 /*
- * wifi_cmd.c — UART0 WiFi command protocol + debug console
+ * wifi_cmd.c — UART1 WiFi command protocol + debug console
  *
  * Ported from Umbreon_roborace.ino: process_commands(), dispatch_command()
  *
  * Architecture:
- *   - UART0 IRQ callback fills a ring buffer
+ *   - UART1 (GP4/GP5) IRQ callback fills a ring buffer
  *   - Dedicated thread wakes on '\n', parses command, dispatches
  *   - Commands that affect control loop are sent via k_msgq
+ *   - UART0 (GP16/GP17) is free for debug console / LOG output
  *
  * Debug console commands ($LOG, $SNS, $IMU, $PID, $SYS, $DIAG, $HELP)
  */
@@ -463,9 +464,9 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 
 void wifi_cmd_init(void)
 {
-	uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+	uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 	if (!device_is_ready(uart_dev)) {
-		LOG_ERR("UART0 not ready");
+		LOG_ERR("UART1 not ready");
 		return;
 	}
 
@@ -478,5 +479,5 @@ void wifi_cmd_init(void)
 			WIFI_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_thread_data, "wifi_cmd");
 
-	LOG_INF("WiFi CMD init (UART0, 115200)");
+	LOG_INF("WiFi CMD init (UART1 GP4/GP5, 115200)");
 }

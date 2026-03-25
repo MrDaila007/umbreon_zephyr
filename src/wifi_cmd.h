@@ -2,14 +2,14 @@
 
 #include <stdbool.h>
 
-/* ─── UART0 WiFi command protocol ────────────────────────────────────────── */
+/* ─── UART1 WiFi command protocol ────────────────────────────────────────── */
 
 void wifi_cmd_init(void);
 
-/* Send a string over UART0 (used by other modules for telemetry/responses) */
+/* Send a string over UART1 (used by other modules for telemetry/responses) */
 void wifi_cmd_send(const char *str);
 
-/* Printf-style send over UART0 */
+/* Printf-style send over UART1 */
 void wifi_cmd_printf(const char *fmt, ...);
 
 /* Log a message via WiFi with $L: prefix (thread-safe).
