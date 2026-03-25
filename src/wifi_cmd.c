@@ -51,7 +51,11 @@ static K_SEM_DEFINE(rx_line_sem, 0, 1);
 static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_len;
 
-/* ─── TX output buffer ────────────────────────────────────────────────────── */
+/* ─── Async TX ring buffer ───────────────────────────────────────────────── */
+#define TX_BUF_SIZE 1024
+static uint8_t tx_buf[TX_BUF_SIZE];
+static volatile uint16_t tx_head;  /* written by threads (under mutex) */
+static volatile uint16_t tx_tail;  /* read by ISR */
 static K_MUTEX_DEFINE(tx_mutex);
 
 /* ─── Debug log flag ──────────────────────────────────────────────────────── */
@@ -63,17 +67,36 @@ static volatile bool log_on;
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
-/* ─── UART TX helpers ─────────────────────────────────────────────────────── */
+/* ─── Async TX helpers ────────────────────────────────────────────────────── */
+
+static inline uint16_t tx_free(void)
+{
+	uint16_t h = tx_head;
+	uint16_t t = tx_tail;
+	/* One slot reserved to distinguish full from empty */
+	return (t > h) ? (t - h - 1) : (TX_BUF_SIZE - h + t - 1);
+}
 
 void wifi_cmd_send(const char *str)
 {
 	if (!uart_dev) {
 		return;
 	}
+
 	k_mutex_lock(&tx_mutex, K_FOREVER);
+
 	for (const char *p = str; *p; p++) {
-		uart_poll_out(uart_dev, *p);
+		uint16_t next = (tx_head + 1) % TX_BUF_SIZE;
+		if (next == tx_tail) {
+			break;  /* ring buffer full — drop rest */
+		}
+		tx_buf[tx_head] = (uint8_t)*p;
+		tx_head = next;
 	}
+
+	/* Kick TX IRQ — ISR will drain the buffer */
+	uart_irq_tx_enable(uart_dev);
+
 	k_mutex_unlock(&tx_mutex);
 }
 
@@ -138,6 +161,7 @@ static void uart_isr(const struct device *dev, void *user_data)
 		return;
 	}
 
+	/* ── RX ────────────────────────────────────────────────────────────── */
 	while (uart_irq_rx_ready(dev)) {
 		uint8_t c;
 		int len = uart_fifo_read(dev, &c, 1);
@@ -153,6 +177,28 @@ static void uart_isr(const struct device *dev, void *user_data)
 
 		if (c == '\n') {
 			k_sem_give(&rx_line_sem);
+		}
+	}
+
+	/* ── TX — drain ring buffer via FIFO ──────────────────────────────── */
+	if (uart_irq_tx_ready(dev)) {
+		uint16_t t = tx_tail;
+		if (t == tx_head) {
+			/* Nothing left to send */
+			uart_irq_tx_disable(dev);
+		} else {
+			/* Build a contiguous chunk to send */
+			uint16_t h = tx_head;
+			uint16_t len;
+			if (h > t) {
+				len = h - t;
+			} else {
+				len = TX_BUF_SIZE - t;  /* up to wrap */
+			}
+			int sent = uart_fifo_fill(dev, &tx_buf[t], len);
+			if (sent > 0) {
+				tx_tail = (t + sent) % TX_BUF_SIZE;
+			}
 		}
 	}
 }
