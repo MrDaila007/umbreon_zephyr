@@ -25,14 +25,19 @@ static const struct gpio_dt_spec tach_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(tach_
 static struct gpio_callback tach_cb_data;
 
 /* ─── Shared state (ISR writes, main reads — all atomic) ──────────────────── */
-static atomic_t taho_count    = ATOMIC_INIT(0);
-static atomic_t taho_last_us  = ATOMIC_INIT(0);
-static atomic_t taho_interval = ATOMIC_INIT(0);
+static atomic_t taho_count     = ATOMIC_INIT(0);
+static atomic_t taho_last_cyc  = ATOMIC_INIT(0);  /* raw HW cycles */
+static atomic_t taho_interval  = ATOMIC_INIT(0);   /* delta in µs */
 
-/* ─── Hardware timer for microseconds ─────────────────────────────────────── */
-static inline uint32_t get_us(void)
+/* ─── Cycle-domain helpers ────────────────────────────────────────────────── */
+/* Subtract in cycle domain (uint32_t wrap is correct), then convert to µs.
+ * k_cycle_get_32() is ISR-safe (reads HW register) and has full clock
+ * resolution (~6.7 ns at 150 MHz).  Wraparound every ~28 s is handled
+ * by unsigned subtraction on the raw cycle values. */
+static inline uint32_t cyc_delta_us(uint32_t from_cyc, uint32_t to_cyc)
 {
-	return (uint32_t)(k_ticks_to_us_floor64(k_uptime_ticks()));
+	uint32_t delta_cyc = to_cyc - from_cyc;          /* handles wrap */
+	return (uint32_t)k_cyc_to_us_floor64(delta_cyc); /* small value — safe */
 }
 
 /* ─── ISR ─────────────────────────────────────────────────────────────────── */
@@ -43,18 +48,18 @@ static void tach_isr(const struct device *dev, struct gpio_callback *cb, uint32_
 	ARG_UNUSED(cb);
 	ARG_UNUSED(pins);
 
-	uint32_t now = get_us();
-	uint32_t last = (uint32_t)atomic_get(&taho_last_us);
-	uint32_t delta = now - last;
+	uint32_t now_cyc = k_cycle_get_32();
+	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
+	uint32_t delta_us = cyc_delta_us(last_cyc, now_cyc);
 
 	/* Debounce: 200µs (supports up to ~5 m/s with 62-hole encoder) */
-	if (delta < 200) {
+	if (delta_us < 200) {
 		return;
 	}
 
 	atomic_inc(&taho_count);
-	atomic_set(&taho_interval, (atomic_val_t)delta);
-	atomic_set(&taho_last_us, (atomic_val_t)now);
+	atomic_set(&taho_interval, (atomic_val_t)delta_us);
+	atomic_set(&taho_last_cyc, (atomic_val_t)now_cyc);
 }
 
 /* ─── Init ────────────────────────────────────────────────────────────────── */
@@ -79,11 +84,11 @@ void taho_init(void)
 
 float taho_get_speed(void)
 {
-	uint32_t now = get_us();
-	uint32_t last = (uint32_t)atomic_get(&taho_last_us);
+	uint32_t now_cyc = k_cycle_get_32();
+	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
 	uint32_t iv = (uint32_t)atomic_get(&taho_interval);
 
-	uint32_t elapsed = now - last;
+	uint32_t elapsed = cyc_delta_us(last_cyc, now_cyc);
 	if (elapsed < iv) {
 		elapsed = iv;
 	}
@@ -103,14 +108,14 @@ uint32_t taho_get_count(void)
 
 uint32_t taho_time_since_last_us(void)
 {
-	uint32_t now = get_us();
-	uint32_t last = (uint32_t)atomic_get(&taho_last_us);
-	return now - last;
+	uint32_t now_cyc = k_cycle_get_32();
+	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
+	return cyc_delta_us(last_cyc, now_cyc);
 }
 
 void taho_reset(void)
 {
 	atomic_set(&taho_count, 0);
-	atomic_set(&taho_last_us, (atomic_val_t)get_us());
+	atomic_set(&taho_last_cyc, (atomic_val_t)k_cycle_get_32());
 	atomic_set(&taho_interval, 0);
 }

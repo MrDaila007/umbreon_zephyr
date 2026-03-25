@@ -323,6 +323,7 @@ void control_cmd_start(void)
 	/* 5-second countdown — idle telemetry flows */
 	int64_t start_at = k_uptime_get() + 5000;
 	while (k_uptime_get() < start_at) {
+		wdt_feed_kick();
 		send_idle_telemetry();
 		k_msleep(cfg.loop_ms);
 	}
