@@ -1,7 +1,7 @@
 /*
  * settings.c — Persistent configuration via Zephyr NVS
  *
- * Stores 32 runtime-configurable parameters to flash.
+ * Stores 34 runtime-configurable parameters to flash.
  * NVS key 1 = CarSettings blob + checksum.
  */
 
@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   7
+#define SETTINGS_VERSION   8
 
 static struct nvs_fs nvs;
 static bool nvs_ready;
@@ -53,6 +53,8 @@ struct __attribute__((packed)) nvs_settings {
 	float    spd_clear;
 	float    spd_blocked;
 	float    spd_slew;
+	float    kick_pct;
+	int16_t  kick_ms;
 	float    coe_clear;
 	float    coe_blocked;
 	float    wrong_dir_deg;
@@ -144,6 +146,8 @@ static void populate_nvs(struct nvs_settings *s)
 	s->spd_clear     = cfg.spd_clear;
 	s->spd_blocked   = cfg.spd_blocked;
 	s->spd_slew      = cfg.spd_slew;
+	s->kick_pct      = cfg.kick_pct;
+	s->kick_ms       = (int16_t)cfg.kick_ms;
 	s->coe_clear     = cfg.coe_clear;
 	s->coe_blocked   = cfg.coe_blocked;
 	s->wrong_dir_deg = cfg.wrong_dir_deg;
@@ -180,6 +184,20 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.spd_clear     = s->spd_clear;
 	cfg.spd_blocked   = s->spd_blocked;
 	cfg.spd_slew      = s->spd_slew;
+	cfg.kick_pct      = s->kick_pct;
+	cfg.kick_ms       = s->kick_ms;
+	if (cfg.kick_ms < 0) {
+		cfg.kick_ms = 0;
+	}
+	if (cfg.kick_ms > 5000) {
+		cfg.kick_ms = 5000;
+	}
+	if (cfg.kick_pct < 0.f) {
+		cfg.kick_pct = 0.f;
+	}
+	if (cfg.kick_pct > 80.f) {
+		cfg.kick_pct = 80.f;
+	}
 	cfg.coe_clear     = s->coe_clear;
 	cfg.coe_blocked   = s->coe_blocked;
 	cfg.wrong_dir_deg = s->wrong_dir_deg;

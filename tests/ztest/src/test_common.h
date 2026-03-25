@@ -65,6 +65,8 @@ struct car_settings {
 	float spd_clear;
 	float spd_blocked;
 	float spd_slew;
+	float kick_pct;
+	int kick_ms;
 	float coe_clear;
 	float coe_blocked;
 	float wrong_dir_deg;
@@ -117,6 +119,8 @@ static inline bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "SPD1") == 0) cfg.spd_clear           = strtof(val, NULL);
 	else if (strcmp(key, "SPD2") == 0) cfg.spd_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "SLW")  == 0) cfg.spd_slew           = strtof(val, NULL);
+	else if (strcmp(key, "KOP")  == 0) cfg.kick_pct           = strtof(val, NULL);
+	else if (strcmp(key, "KOM")  == 0) cfg.kick_ms            = MAX(atoi(val), 0);
 	else if (strcmp(key, "COE1") == 0) cfg.coe_clear           = strtof(val, NULL);
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
