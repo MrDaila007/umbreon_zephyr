@@ -8,7 +8,7 @@ MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
 BAUD         ?= 115200
 
-.PHONY: build flash monitor clean
+.PHONY: build flash monitor clean test test-host test-ztest
 
 build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
@@ -20,6 +20,15 @@ flash:
 
 monitor:
 	picocom $(SERIAL_PORT) -b $(BAUD)
+
+test:
+	$(MAKE) -C tests test
+
+test-host:
+	$(MAKE) -C tests test-host
+
+test-ztest:
+	$(MAKE) -C tests test-ztest
 
 clean:
 	rm -rf $(BUILD_DIR)
