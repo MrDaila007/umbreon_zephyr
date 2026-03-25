@@ -141,6 +141,7 @@ void car_pid_reset(void)
 	pid_prev_cnt = 0;
 	pid_prev_ms = 0;
 	target_speed = 0;
+	pid_ref_applied = 0;
 }
 
 void car_pid_control(void)

@@ -77,23 +77,26 @@ static void set_defaults(void)
 	cfg.side_open_dist      = DEFAULT_SOD;
 	cfg.all_close_dist      = DEFAULT_ACD;
 	cfg.close_front_dist    = DEFAULT_CFD;
-	cfg.pid_kp   = 60.0f;
-	cfg.pid_ki   = 40.0f;
-	cfg.pid_kd   = 6.0f;
+	/* PID: tuned for low-speed (≈0.3–0.5 m/s) + feedforward µs path — conservative
+	 * to limit oscillation; run $TEST:pidtune on your track and $SAVE when happy. */
+	cfg.pid_kp   = 52.0f;
+	cfg.pid_ki   = 28.0f;
+	cfg.pid_kd   = 7.0f;
 	cfg.min_speed   = 1540;
-	cfg.max_speed   = 1700;
+	cfg.max_speed   = 1600;
 	cfg.min_bspeed  = 1460;
-	cfg.min_point     = 40;
-	cfg.max_point     = 140;
+	cfg.min_point     = 60;
+	cfg.max_point     = 120;
 	cfg.neutral_point = 90;
 	cfg.encoder_holes = 62;
 	cfg.wheel_diam_m  = 0.060f;
 	cfg.loop_ms       = 40;
-	cfg.spd_clear     = 2.7f;
-	cfg.spd_blocked   = 0.8f;
-	cfg.spd_slew      = 1.0f;
-	cfg.coe_clear     = 0.3f;
-	cfg.coe_blocked   = 0.7f;
+	/* Cruise targets (m/s): safe bench/track defaults, not race pace */
+	cfg.spd_clear     = 0.48f;
+	cfg.spd_blocked   = 0.32f;
+	cfg.spd_slew      = 0.85f;
+	cfg.coe_clear     = 0.28f;
+	cfg.coe_blocked   = 0.65f;
 	cfg.wrong_dir_deg = 120.0f;
 	cfg.race_cw       = true;
 	cfg.stuck_thresh  = 25;
