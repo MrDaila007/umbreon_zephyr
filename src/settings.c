@@ -79,11 +79,12 @@ static void set_defaults(void)
 	cfg.side_open_dist      = DEFAULT_SOD;
 	cfg.all_close_dist      = DEFAULT_ACD;
 	cfg.close_front_dist    = DEFAULT_CFD;
-	/* PID: tuned for low-speed (≈0.3–0.5 m/s) + feedforward µs path — conservative
-	 * to limit oscillation; run $TEST:pidtune on your track and $SAVE when happy. */
-	cfg.pid_kp   = 52.0f;
-	cfg.pid_ki   = 28.0f;
-	cfg.pid_kd   = 7.0f;
+	/* PID from $TEST:pidtune logs (2026-03-26): runs 2–3 where best=1 had real τ;
+	 * PI rows averaged (66.21/264.86 and 66.64/222.13); KD from run-3 IMC (4.16).
+	 * Skipped run-1 best=2 (τ floor 0.05 s → unrealistic KI). Re-tune after hardware change. */
+	cfg.pid_kp   = 66.4f;
+	cfg.pid_ki   = 243.5f;
+	cfg.pid_kd   = 4.16f;
 	cfg.min_speed   = 1540;
 	cfg.max_speed   = 1600;
 	cfg.min_bspeed  = 1460;
@@ -97,6 +98,8 @@ static void set_defaults(void)
 	cfg.spd_clear     = 0.48f;
 	cfg.spd_blocked   = 0.32f;
 	cfg.spd_slew      = 0.85f;
+	cfg.kick_pct      = 18.0f;
+	cfg.kick_ms       = 300;
 	cfg.coe_clear     = 0.28f;
 	cfg.coe_blocked   = 0.65f;
 	cfg.wrong_dir_deg = 120.0f;

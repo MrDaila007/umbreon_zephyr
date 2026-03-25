@@ -112,9 +112,9 @@ static const struct param_desc params[] = {
 	{"ACD", "All Close",  PT_INT,   10,  100,   50, 9000, P_OFF(all_close_dist),      1},
 	{"CFD", "Close Frt",  PT_INT,   10,  100,   50, 9000, P_OFF(close_front_dist),    1},
 	/* PID */
-	{"KP",  "PID Kp",     PT_FLOAT, 0.1f, 1.0f, 0, 200, P_OFF(pid_kp),              1},
-	{"KI",  "PID Ki",     PT_FLOAT, 0.1f, 1.0f, 0, 200, P_OFF(pid_ki),              1},
-	{"KD",  "PID Kd",     PT_FLOAT, 0.1f, 1.0f, 0, 200, P_OFF(pid_kd),              1},
+	{"KP",  "PID Kp",     PT_FLOAT, 0.1f, 1.0f, 0, 300, P_OFF(pid_kp),              1},
+	{"KI",  "PID Ki",     PT_FLOAT, 0.5f, 5.0f, 0, 5000, P_OFF(pid_ki),              1},
+	{"KD",  "PID Kd",     PT_FLOAT, 0.05f,0.5f, 0, 50,  P_OFF(pid_kd),              1},
 	/* Speed / ESC (µs) */
 	{"MSP", "Min Spd",    PT_INT,   5,   20,  1500, 2000, P_OFF(min_speed),           1},
 	{"XSP", "Max Spd",    PT_INT,   5,   20,  1500, 2000, P_OFF(max_speed),           1},
