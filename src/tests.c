@@ -21,6 +21,9 @@
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(tests, LOG_LEVEL_INF);
 
@@ -221,7 +224,7 @@ static void test_autotune(void)
 		uint32_t dc = cnt - prev_cnt;
 		prev_cnt = cnt;
 		float raw = (dc / (float)cfg.encoder_holes) *
-			    (3.14159265f * cfg.wheel_diam_m) / dt;
+			    ((float)M_PI * cfg.wheel_diam_m) / dt;
 		filtered = 0.5f * raw + 0.5f * filtered;
 		if (taho_time_since_last_us() > 500000) {
 			filtered = 0;

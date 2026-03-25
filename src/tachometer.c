@@ -14,6 +14,9 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(tachometer, LOG_LEVEL_INF);
 
@@ -29,7 +32,7 @@ static atomic_t taho_interval = ATOMIC_INIT(0);
 /* ─── Hardware timer for microseconds ─────────────────────────────────────── */
 static inline uint32_t get_us(void)
 {
-	return (uint32_t)(k_cyc_to_us_floor64(k_cycle_get_32()));
+	return (uint32_t)(k_ticks_to_us_floor64(k_uptime_ticks()));
 }
 
 /* ─── ISR ─────────────────────────────────────────────────────────────────── */
@@ -89,7 +92,7 @@ float taho_get_speed(void)
 		return 0.0f;
 	}
 
-	return (3.14159265f * cfg.wheel_diam_m) /
+	return ((float)M_PI * cfg.wheel_diam_m) /
 	       ((float)cfg.encoder_holes * ((float)elapsed / 1e6f));
 }
 

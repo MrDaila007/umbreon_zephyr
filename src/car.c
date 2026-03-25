@@ -14,6 +14,9 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(car, LOG_LEVEL_INF);
 
@@ -161,7 +164,7 @@ void car_pid_control(void)
 	float raw_speed = 0.0f;
 	if (cfg.encoder_holes > 0) {
 		raw_speed = (delta_cnt / (float)cfg.encoder_holes) *
-			    (3.14159265f * cfg.wheel_diam_m) / dt;
+			    ((float)M_PI * cfg.wheel_diam_m) / dt;
 	}
 
 	/* EMA filter (0.7 = responsive, 0.3 = smooth) */

@@ -18,6 +18,8 @@
 
 LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 
+#define VL53L0X_MAX_RAW  8190  /* sensor overflow / out-of-range indicator */
+
 /* ─── Device handles ──────────────────────────────────────────────────────── */
 static const struct device *vl53_devs[SENSOR_COUNT];
 static bool vl53_valid[SENSOR_COUNT];
@@ -95,7 +97,7 @@ int *sensors_poll(void)
 		 * val.val1 = integer meters, val.val2 = fractional (in micro, i.e. 1e-6)
 		 * Convert to mm: val1*1000 + val2/1000 */
 		int mm = val.val1 * 1000 + val.val2 / 1000;
-		if (mm >= 8190 || mm <= 0) {
+		if (mm >= VL53L0X_MAX_RAW || mm <= 0) {
 			distances[i] = 9999;
 		} else {
 			/* mm == cm×10 (identity conversion), cap at MAX_SENSOR_RANGE */

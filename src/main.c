@@ -96,12 +96,17 @@ int main(void)
 	settings_init();
 	settings_load();
 
+	/* Start watchdog early to protect init sequence */
+	wdt_init();
+
 	/* Initialize hardware subsystems */
 	car_init();
 	taho_init();
-	sensors_init();
+	sensors_init();      /* ~500 ms I2C probing */
 	imu_init();
-	imu_calibrate();
+	wdt_feed_kick();
+	imu_calibrate();     /* ~1 sec */
+	wdt_feed_kick();
 	battery_init();
 	wifi_cmd_init();
 	track_learn_init();
@@ -112,15 +117,13 @@ int main(void)
 			sensors_online_count(), FW_VERSION);
 
 	/* ESC calibration on first boot */
+	wdt_feed_kick();
 	if (!cfg.calibrated) {
-		car_run_calibration();
+		car_run_calibration(); /* feeds wdt internally */
 	} else {
 		/* Allow ESC to arm and sensors to start */
 		k_msleep(3700);
 	}
-
-	/* Start watchdog */
-	wdt_init();
 
 	/* Start control thread */
 	control_init();
