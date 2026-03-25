@@ -324,10 +324,10 @@ static void test_autotune(void)
 
 /* ─── Test: pidtune (step-response FOPDT identification) ──────────────────── */
 /*
- * Unlike relay-based autotune, this method applies open-loop ESC steps from
- * min_speed to max_speed, records the speed response, and fits a first-order-
- * plus-dead-time (FOPDT) model at each operating point.  Lambda/IMC tuning
- * then produces conservative PID coefficients that won't "kick" at low speeds.
+ * Step-response PID tuning for low-speed operation (0.1–0.5 m/s).
+ * Applies open-loop ESC steps while steering reactively to avoid walls.
+ * Fits FOPDT model at each operating point; Lambda/IMC tuning produces
+ * conservative coefficients that won't "kick" at low speed.
  *
  * Protocol:
  *   $T:PTUNE,phase=arm
@@ -343,11 +343,37 @@ static void test_autotune(void)
  */
 
 #define PTUNE_MAX_STEPS     8
-#define PTUNE_MAX_SAMPLES   80   /* 4 s @ 50 ms */
+#define PTUNE_MAX_SAMPLES   60   /* 3 s @ 50 ms */
 #define PTUNE_SAMPLE_MS     50
-#define PTUNE_STEP_MS       4000 /* drive duration per step */
+#define PTUNE_STEP_MS       3000 /* drive duration per step */
 #define PTUNE_SETTLE_MS     1500 /* wait after stop */
 #define PTUNE_NOISE_THRESH  0.03f
+#define PTUNE_MAX_SPEED     0.50f /* abort step if exceeded */
+
+/* Reactive steering for pidtune — keeps car away from walls */
+static void ptune_steer(void)
+{
+	int *s = sensors_poll();
+
+	int diff;
+	if (s[IDX_LEFT] > cfg.side_open_dist &&
+	    s[IDX_RIGHT] > cfg.side_open_dist) {
+		diff = 0;
+	} else {
+		diff = s[IDX_RIGHT] - s[IDX_LEFT];
+	}
+
+	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
+
+	/* Front obstacle — steer hard away */
+	if (s[IDX_FRONT_LEFT] < cfg.front_obstacle_dist)
+		diff += cfg.front_obstacle_dist - s[IDX_FRONT_LEFT];
+	if (s[IDX_FRONT_RIGHT] < cfg.front_obstacle_dist)
+		diff -= cfg.front_obstacle_dist - s[IDX_FRONT_RIGHT];
+
+	int steer = (int)(diff * cfg.coe_clear);
+	car_write_steer(steer);
+}
 
 static void test_pidtune(void)
 {
@@ -355,14 +381,19 @@ static void test_pidtune(void)
 
 	wifi_cmd_send("$T:PTUNE,phase=arm\n");
 	car_write_speed(0);
+	car_write_steer(0);
 	k_msleep(2000);
 	taho_reset();
 
-	/* ESC values spread from min_speed to max_speed */
+	/* ESC values: N steps within the low-speed region.
+	 * We cap the range so steady-state stays ≤ 0.5 m/s.
+	 * Use min_speed … min_speed + 60 µs (typically covers 0–0.5 m/s). */
 	int esc_vals[PTUNE_MAX_STEPS];
-	int esc_range = cfg.max_speed - cfg.min_speed;
+	int esc_lo  = cfg.min_speed;
+	int esc_hi  = cfg.min_speed + 60;
+	if (esc_hi > cfg.max_speed) esc_hi = cfg.max_speed;
 	for (int i = 0; i < N_STEPS; i++) {
-		esc_vals[i] = cfg.min_speed + (i * esc_range) / (N_STEPS - 1);
+		esc_vals[i] = esc_lo + (i * (esc_hi - esc_lo)) / (N_STEPS - 1);
 	}
 
 	/* Per-step FOPDT results */
@@ -383,6 +414,7 @@ static void test_pidtune(void)
 
 		/* Full stop between steps */
 		car_write_esc_us(NEUTRAL_SPEED);
+		car_write_steer(0);
 		taho_reset();
 		k_msleep(PTUNE_SETTLE_MS);
 
@@ -392,12 +424,17 @@ static void test_pidtune(void)
 		int ns = 0;
 		int64_t t0 = k_uptime_get();
 		int64_t prev_t = t0;
+		bool speed_cut = false;
 
 		car_write_esc_us(esc);
 
 		while ((k_uptime_get() - t0) < PTUNE_STEP_MS &&
 		       ns < PTUNE_MAX_SAMPLES) {
 			wdt_feed_kick();
+
+			/* Reactive wall-avoidance steering */
+			ptune_steer();
+
 			int64_t now = k_uptime_get();
 			if (now - prev_t < PTUNE_SAMPLE_MS) {
 				k_msleep(5);
@@ -415,6 +452,12 @@ static void test_pidtune(void)
 			if (taho_time_since_last_us() > 500000)
 				filtered = 0;
 
+			/* Safety: abort step if speed exceeds limit */
+			if (filtered > PTUNE_MAX_SPEED) {
+				speed_cut = true;
+				break;
+			}
+
 			samples[ns++] = filtered;
 
 			wifi_cmd_printf("$T:PTUNE,n=%d,v=%.3f,t=%.2f\n",
@@ -423,8 +466,16 @@ static void test_pidtune(void)
 		}
 
 		car_write_esc_us(NEUTRAL_SPEED);
+		car_write_steer(0);
 
-		if (ns < 20) {
+		if (speed_cut) {
+			wifi_cmd_printf("$T:PTUNE,step_cut,n=%d,v=%.2f\n",
+					si + 1, (double)filtered);
+			/* Skip this and all higher ESC steps */
+			break;
+		}
+
+		if (ns < 10) {
 			wifi_cmd_printf("$T:PTUNE,step_skip,n=%d,samples=%d\n",
 					si + 1, ns);
 			continue;
@@ -480,6 +531,7 @@ static void test_pidtune(void)
 	}
 
 	car_write_speed(0);
+	car_write_steer(0);
 	k_msleep(500);
 
 	if (nv < 1) {
