@@ -15,6 +15,7 @@
 #include "wifi_cmd.h"
 #include "battery.h"
 #include "track_learn.h"
+#include "display.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -280,6 +281,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 			} else if (now - bat_low_since > 10000) {
 				if (car_running || drv_enabled) {
 					car_running = false;
+					display_notify_run_state(false);
 					drv_enabled = false;
 					manual_mode = false;
 					car_write_speed(0);
@@ -329,12 +331,14 @@ void control_cmd_start(void)
 	}
 
 	car_running = true;
+	display_notify_run_state(true);
 	wifi_cmd_send("$STS:RUN\n");
 }
 
 void control_cmd_stop(void)
 {
 	car_running = false;
+	display_notify_run_state(false);
 	drv_enabled = false;
 	manual_mode = false;
 	manual_steer = 0;

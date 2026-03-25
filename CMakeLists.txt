@@ -15,4 +15,6 @@ target_sources(app PRIVATE
     src/battery.c
     src/tests.c
     src/track_learn.c
+    src/encoder.c
+    src/display.c
 )

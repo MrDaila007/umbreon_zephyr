@@ -19,6 +19,8 @@
 #include "battery.h"
 #include "tests.h"
 #include "track_learn.h"
+#include "encoder.h"
+#include "display.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -110,6 +112,8 @@ int main(void)
 	battery_init();
 	wifi_cmd_init();
 	track_learn_init();
+	encoder_init();
+	display_init();
 
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */

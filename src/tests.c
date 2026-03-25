@@ -15,6 +15,7 @@
 #include "imu.h"
 #include "wifi_cmd.h"
 #include "control.h"
+#include "display.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -365,6 +366,8 @@ void tests_run_by_name(const char *name)
 		control_cmd_stop();
 	}
 
+	display_notify_test_state(true);
+
 	if      (strcmp(name, "lidar")    == 0) test_lidar();
 	else if (strcmp(name, "servo")    == 0) test_servo();
 	else if (strcmp(name, "taho")     == 0) test_taho();
@@ -376,4 +379,6 @@ void tests_run_by_name(const char *name)
 	else {
 		wifi_cmd_printf("$NAK:unknown_test:%s\n", name);
 	}
+
+	display_notify_test_state(false);
 }

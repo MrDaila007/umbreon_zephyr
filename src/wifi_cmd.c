@@ -22,6 +22,7 @@
 #include "control.h"
 #include "tests.h"
 #include "track_learn.h"
+#include "display.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -483,24 +484,57 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 	/* Query ESP status */
 	wifi_cmd_send("#WIFISTATUS\n");
 
-	while (1) {
-		/* Block until a full line is available */
-		k_sem_take(&rx_line_sem, K_FOREVER);
+	/* Poll on both UART semaphore and OLED menu command queue */
+	struct k_poll_event poll_events[2] = {
+		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+					 K_POLL_MODE_NOTIFY_ONLY, &rx_line_sem),
+		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					 K_POLL_MODE_NOTIFY_ONLY, &menu_cmd_q),
+	};
 
-		/* Drain ring buffer into cmd_buf */
-		uint8_t c;
-		while (rb_get(&c)) {
-			if (c == '\n' || c == '\r') {
-				if (cmd_len > 0) {
-					cmd_buf[cmd_len] = '\0';
-					if (cmd_buf[0] == '$') {
-						dispatch_command(cmd_buf);
+	while (1) {
+		k_poll(poll_events, 2, K_FOREVER);
+
+		/* Reset poll event states */
+		poll_events[0].state = K_POLL_STATE_NOT_READY;
+		poll_events[1].state = K_POLL_STATE_NOT_READY;
+
+		/* Handle UART line if available */
+		if (k_sem_take(&rx_line_sem, K_NO_WAIT) == 0) {
+			uint8_t c;
+			while (rb_get(&c)) {
+				if (c == '\n' || c == '\r') {
+					if (cmd_len > 0) {
+						cmd_buf[cmd_len] = '\0';
+						if (cmd_buf[0] == '$') {
+							dispatch_command(cmd_buf);
+						}
+						cmd_len = 0;
 					}
-					/* # ESP status lines — just log, no parsing needed */
-					cmd_len = 0;
+				} else if (cmd_len < CMD_BUF_SIZE - 1) {
+					cmd_buf[cmd_len++] = (char)c;
 				}
-			} else if (cmd_len < CMD_BUF_SIZE - 1) {
-				cmd_buf[cmd_len++] = (char)c;
+			}
+		}
+
+		/* Handle OLED menu commands */
+		uint8_t mcmd;
+		while (k_msgq_get(&menu_cmd_q, &mcmd, K_NO_WAIT) == 0) {
+			switch (mcmd) {
+			case MCMD_START: control_cmd_start(); break;
+			case MCMD_STOP:  control_cmd_stop();  break;
+			case MCMD_SAVE:  settings_save(); wifi_cmd_send("$ACK\n"); break;
+			case MCMD_LOAD:  settings_load(); wifi_cmd_send("$ACK\n"); break;
+			case MCMD_RESET: settings_reset(); wifi_cmd_send("$ACK\n"); break;
+			default:
+				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
+					static const char *test_names[] = {
+						"lidar", "servo", "taho", "esc",
+						"speed", "autotune", "reactive", "cal",
+					};
+					tests_run_by_name(test_names[mcmd - MCMD_TEST_BASE]);
+				}
+				break;
 			}
 		}
 	}

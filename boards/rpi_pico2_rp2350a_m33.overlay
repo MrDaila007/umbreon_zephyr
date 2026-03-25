@@ -40,6 +40,48 @@
 			label = "Tachometer";
 		};
 	};
+
+	/* ─── Bit-bang I2C for SSD1306 OLED (GP18=SDA, GP20=SCL) ──────────── */
+	i2c_oled: i2c-oled {
+		compatible = "gpio-i2c";
+		sda-gpios = <&gpio0 18 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
+		scl-gpios = <&gpio0 20 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
+		clock-frequency = <100000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		ssd1306: ssd1306@3c {
+			compatible = "solomon,ssd1306fb";
+			reg = <0x3c>;
+			width = <128>;
+			height = <64>;
+			segment-offset = <0>;
+			page-offset = <0>;
+			display-offset = <0>;
+			multiplex-ratio = <63>;
+			segment-remap;
+			com-invdir;
+			prechargep = <0x22>;
+			ready-time-ms = <200>;
+		};
+	};
+
+	encoder {
+		compatible = "gpio-keys";
+		enc_a: enc_clk {
+			gpios = <&gpio0 22 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Encoder CLK";
+		};
+		enc_b: enc_dt {
+			gpios = <&gpio0 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Encoder DT";
+		};
+		enc_sw: enc_btn {
+			gpios = <&gpio0 19 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Encoder Button";
+		};
+	};
 };
 
 /* ─── Pinctrl overrides ──────────────────────────────────────────────────── */
@@ -105,6 +147,8 @@
 		reg = <0x68>;
 		status = "okay";
 	};
+
+	/* SSD1306 moved to dedicated i2c-gpio bus (i2c_oled) */
 };
 
 /* ─── I2C1: 6× VL53L0X ToF sensors ──────────────────────────────────────── */

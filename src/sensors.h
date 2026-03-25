@@ -12,3 +12,7 @@ int *sensors_poll(void);
 
 /* Get number of successfully initialized sensors */
 int sensors_online_count(void);
+
+/* Get pointer to last-polled distance array (6 values, cm×10).
+ * Updated by sensors_poll() in control thread. Read-only. */
+const int *sensors_get_distances(void);

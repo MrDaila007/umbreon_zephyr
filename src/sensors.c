@@ -112,3 +112,8 @@ int sensors_online_count(void)
 {
 	return online_count;
 }
+
+const int *sensors_get_distances(void)
+{
+	return distances;
+}
