@@ -1,0 +1,60 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.27.4
+    env:
+      ZEPHYR_VERSION: v4.1.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Cache west modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            zephyrproject
+            ~/.cache/pip
+          key: west-${{ env.ZEPHYR_VERSION }}-${{ hashFiles('app/prj.conf') }}
+          restore-keys: |
+            west-${{ env.ZEPHYR_VERSION }}-
+
+      - name: Initialize Zephyr workspace
+        run: |
+          if [ ! -d zephyrproject/.west ]; then
+            west init -m https://github.com/zephyrproject-rtos/zephyr --mr $ZEPHYR_VERSION zephyrproject
+            cd zephyrproject
+            west update --narrow -o=--depth=1
+          else
+            echo "Using cached workspace"
+          fi
+
+      - name: Apply RP2350 flash cherry-picks
+        working-directory: zephyrproject
+        run: |
+          cd zephyr
+          git cherry-pick --no-commit 5d36e85b99a || true
+
+          cd ../modules/hal/rpi_pico
+          git cherry-pick --no-commit 5d7744c || true
+
+      - name: Build firmware
+        working-directory: zephyrproject
+        run: |
+          west build -b rpi_pico2/rp2350a/m33 --pristine always $GITHUB_WORKSPACE/app
+
+      - name: Upload UF2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: zephyrproject/build/zephyr/zephyr.uf2
