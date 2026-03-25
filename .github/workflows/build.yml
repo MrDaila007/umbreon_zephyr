@@ -55,10 +55,10 @@ jobs:
         working-directory: zephyrproject
         run: |
           cd zephyr
-          curl -sL https://github.com/zephyrproject-rtos/zephyr/commit/5d36e85b99a.patch | git apply --3way || true
+          curl -sL https://github.com/zephyrproject-rtos/zephyr/commit/5d36e85b99a.patch | git apply -v
 
           cd ../modules/hal/rpi_pico
-          curl -sL https://github.com/zephyrproject-rtos/hal_rpi_pico/commit/5d7744c.patch | git apply --3way || true
+          curl -sL https://github.com/zephyrproject-rtos/hal_rpi_pico/commit/5d7744c.patch | git apply -v
 
       - name: Build firmware
         working-directory: zephyrproject
