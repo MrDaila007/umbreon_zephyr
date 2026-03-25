@@ -130,6 +130,7 @@ static const struct param_desc params[] = {
 	{"LMS", "Loop ms",    PT_INT,   5,   10,   10, 200,   P_OFF(loop_ms),             1},
 	{"SPD1","Spd Clr",    PT_FLOAT, 0.1f, 0.5f, 0, 5.0f, P_OFF(spd_clear),          1},
 	{"SPD2","Spd Blk",    PT_FLOAT, 0.1f, 0.5f, 0, 5.0f, P_OFF(spd_blocked),        1},
+	{"SLW", "Spd Slew",   PT_FLOAT, 0.05f,0.2f, 0, 20.0f,P_OFF(spd_slew),           1},
 	{"COE1","Coe Clr",    PT_FLOAT, 0.05f,0.1f, 0, 2.0f, P_OFF(coe_clear),          1},
 	{"COE2","Coe Blk",    PT_FLOAT, 0.05f,0.1f, 0, 2.0f, P_OFF(coe_blocked),        1},
 	/* Navigation */
@@ -158,9 +159,9 @@ static const struct param_group groups[] = {
 	{"Speed/ESC",   7,  3},
 	{"Steering",   10,  3},
 	{"Tachometer", 13,  2},
-	{"Control",    15,  5},
-	{"Navigation", 20,  3},
-	{"Hardware",   23,  5},
+	{"Control",    15,  6},
+	{"Navigation", 21,  3},
+	{"Hardware",   24,  5},
 };
 #define GROUP_COUNT ((int)(sizeof(groups) / sizeof(groups[0])))
 

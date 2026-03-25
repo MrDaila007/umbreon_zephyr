@@ -1,7 +1,7 @@
 /*
  * settings.c — Persistent configuration via Zephyr NVS
  *
- * Stores 31 runtime-configurable parameters to flash.
+ * Stores 32 runtime-configurable parameters to flash.
  * NVS key 1 = CarSettings blob + checksum.
  */
 
@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   6
+#define SETTINGS_VERSION   7
 
 static struct nvs_fs nvs;
 static bool nvs_ready;
@@ -52,6 +52,7 @@ struct __attribute__((packed)) nvs_settings {
 	int8_t   loop_ms;
 	float    spd_clear;
 	float    spd_blocked;
+	float    spd_slew;
 	float    coe_clear;
 	float    coe_blocked;
 	float    wrong_dir_deg;
@@ -90,6 +91,7 @@ static void set_defaults(void)
 	cfg.loop_ms       = 40;
 	cfg.spd_clear     = 2.7f;
 	cfg.spd_blocked   = 0.8f;
+	cfg.spd_slew      = 1.0f;
 	cfg.coe_clear     = 0.3f;
 	cfg.coe_blocked   = 0.7f;
 	cfg.wrong_dir_deg = 120.0f;
@@ -138,6 +140,7 @@ static void populate_nvs(struct nvs_settings *s)
 	s->loop_ms       = (int8_t)cfg.loop_ms;
 	s->spd_clear     = cfg.spd_clear;
 	s->spd_blocked   = cfg.spd_blocked;
+	s->spd_slew      = cfg.spd_slew;
 	s->coe_clear     = cfg.coe_clear;
 	s->coe_blocked   = cfg.coe_blocked;
 	s->wrong_dir_deg = cfg.wrong_dir_deg;
@@ -173,6 +176,7 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.loop_ms       = s->loop_ms;
 	cfg.spd_clear     = s->spd_clear;
 	cfg.spd_blocked   = s->spd_blocked;
+	cfg.spd_slew      = s->spd_slew;
 	cfg.coe_clear     = s->coe_clear;
 	cfg.coe_blocked   = s->coe_blocked;
 	cfg.wrong_dir_deg = s->wrong_dir_deg;

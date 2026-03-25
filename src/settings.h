@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* ─── Runtime-configurable parameters (31 total) ──────────────────────────── */
+/* ─── Runtime-configurable parameters (32 total) ──────────────────────────── */
 struct car_settings {
 	/* Obstacle thresholds (cm×10) */
 	int front_obstacle_dist;
@@ -36,6 +36,8 @@ struct car_settings {
 	/* Speed/steer coefficients */
 	float spd_clear;
 	float spd_blocked;
+	/* Max rate of change of PID speed setpoint (m/s²); 0 = instant step */
+	float spd_slew;
 	float coe_clear;
 	float coe_blocked;
 

@@ -335,7 +335,7 @@ static void test_autotune(void)
  *   $T:PTUNE,n=1,v=0.12,t=0.55          (real-time speed samples)
  *   $TR:PTUNE,n=1,K=0.00230,L=0.30,tau=0.85,ss=0.45
  *   ...
- *   $TR:PTUNE,best=1,K=...,L=...,tau=...
+ *   $TR:PTUNE,best=1,K=...,L=...,tau=...  (best ≈ step nearest 0.4 m/s ss, else lowest ss)
  *   $TR:IMC,KP=...,KI=...,KD=...,lambda=...
  *   $TR:PI,KP=...,KI=...,KD=0.0000
  *   $TR:PTUNE,ff_esc=1520
@@ -540,12 +540,32 @@ static void test_pidtune(void)
 		return;
 	}
 
-	/* Pick the lowest-speed valid step — most relevant for low-speed
-	 * operation where "kicking" is the problem. */
+	/* Prefer a valid step whose steady-state is in the usual cruise band
+	 * (~0.3–0.5 m/s) so IMC/PI matches real driving.  Fallback: lowest ss. */
+#define PTUNE_SS_TARGET   0.40f
+#define PTUNE_SS_BAND_LO  0.22f
+#define PTUNE_SS_BAND_HI  0.55f
+
 	int best = 0;
-	for (int i = 1; i < nv; i++) {
-		if (step_ss[i] < step_ss[best])
-			best = i;
+	bool in_band = false;
+	float best_dist = 1e9f;
+	for (int i = 0; i < nv; i++) {
+		float ss = step_ss[i];
+		if (ss >= PTUNE_SS_BAND_LO && ss <= PTUNE_SS_BAND_HI) {
+			float d = fabsf(ss - PTUNE_SS_TARGET);
+			if (!in_band || d < best_dist) {
+				in_band = true;
+				best_dist = d;
+				best = i;
+			}
+		}
+	}
+	if (!in_band) {
+		for (int i = 1; i < nv; i++) {
+			if (step_ss[i] < step_ss[best]) {
+				best = i;
+			}
+		}
 	}
 
 	float K   = step_K[best];

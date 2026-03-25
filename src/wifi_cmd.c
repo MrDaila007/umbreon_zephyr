@@ -240,6 +240,7 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "LMS")  == 0) cfg.loop_ms             = MAX(atoi(val), 10);
 	else if (strcmp(key, "SPD1") == 0) cfg.spd_clear           = strtof(val, NULL);
 	else if (strcmp(key, "SPD2") == 0) cfg.spd_blocked         = strtof(val, NULL);
+	else if (strcmp(key, "SLW")  == 0) cfg.spd_slew           = strtof(val, NULL);
 	else if (strcmp(key, "COE1") == 0) cfg.coe_clear           = strtof(val, NULL);
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
@@ -266,7 +267,7 @@ static void cmd_get(void)
 		",MSP=%d,XSP=%d,BSP=%d"
 		",MNP=%d,XNP=%d,NTP=%d"
 		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,COE1=%.2f,COE2=%.2f"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,COE1=%.2f,COE2=%.2f"
 		",WDD=%.1f,RCW=%d,STK=%d"
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
@@ -278,6 +279,7 @@ static void cmd_get(void)
 		cfg.min_point, cfg.max_point, cfg.neutral_point,
 		cfg.encoder_holes, (double)cfg.wheel_diam_m, cfg.loop_ms,
 		(double)cfg.spd_clear, (double)cfg.spd_blocked,
+		(double)cfg.spd_slew,
 		(double)cfg.coe_clear, (double)cfg.coe_blocked,
 		(double)cfg.wrong_dir_deg, cfg.race_cw ? 1 : 0, cfg.stuck_thresh,
 		cfg.imu_rotate ? 1 : 0, cfg.servo_reverse ? 1 : 0,

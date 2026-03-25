@@ -26,6 +26,7 @@ static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
 
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;
+static float pid_ref_applied; /* setpoint after spd_slew limiting */
 static float pid_integral;
 static float pid_prev_filtered;  /* for derivative-on-measurement */
 static float pid_filtered;
@@ -173,15 +174,29 @@ void car_pid_control(void)
 		pid_filtered = 0;
 	}
 
+	/* Slew-limit setpoint (m/s²) — smooth start / mode transitions */
+	if (cfg.spd_slew > 0.001f) {
+		float step = cfg.spd_slew * dt;
+		if (target_speed > pid_ref_applied + step) {
+			pid_ref_applied += step;
+		} else if (target_speed < pid_ref_applied - step) {
+			pid_ref_applied -= step;
+		} else {
+			pid_ref_applied = target_speed;
+		}
+	} else {
+		pid_ref_applied = target_speed;
+	}
+
 	/* PID — derivative on measurement (no kick on target change) */
-	float error = target_speed - pid_filtered;
+	float error = pid_ref_applied - pid_filtered;
 	pid_integral += error * dt;
 	pid_integral = CLAMP(pid_integral, -50.0f, 50.0f);
 	float deriv = -(pid_filtered - pid_prev_filtered) / dt;
 	pid_prev_filtered = pid_filtered;
 
-	/* Feedforward: jump past motor dead zone */
-	float ff = (target_speed > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;
+	/* Feedforward: jump past motor dead zone (follows slewed setpoint) */
+	float ff = (pid_ref_applied > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;
 	float output = ff + cfg.pid_kp * error + cfg.pid_ki * pid_integral + cfg.pid_kd * deriv;
 
 	int esc_val = NEUTRAL_SPEED + (int)output;
