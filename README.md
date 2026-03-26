@@ -1,7 +1,7 @@
 # Umbreon Zephyr — Autonomous Roborace Firmware
 
 Firmware for the Umbreon autonomous racing robot running on Zephyr RTOS.
-Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 2).
+Targets Zephyr v4.3 (recommended) for RP2350 (Raspberry Pi Pico 2).
 
 ## Hardware
 
@@ -30,21 +30,27 @@ Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 
 ### Prerequisites
 
 - Zephyr SDK 0.17+ with ARM toolchain
-- Zephyr v4.1 workspace (`~/zephyrproject`)
+- Zephyr v4.3+ workspace (`~/zephyrproject`)
 
-### Quick Setup (Zephyr v4.1 only)
+### Quick Setup
 
-The RP2350 flash driver is broken in Zephyr v4.1 out of the box. The setup script
-initializes the workspace and applies the required patches automatically:
+```bash
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0 ~/zephyrproject
+cd ~/zephyrproject && west update --narrow -o=--depth=1
+python3 -m venv .venv && source .venv/bin/activate
+pip install west && pip install -r zephyr/scripts/requirements.txt
+```
+
+<details>
+<summary>Legacy: Zephyr v4.1 (requires flash patches)</summary>
+
+The RP2350 flash driver is broken in v4.1. Use `setup_zephyr.sh` to apply patches:
 
 ```bash
 ./setup_zephyr.sh              # full setup (workspace + patches)
 ./setup_zephyr.sh --patch-only # patches only (existing workspace)
-./setup_zephyr.sh ~/my/path    # custom workspace path
 ```
-
-> **Note:** If you are using Zephyr v4.3 or newer, the patches are already included
-> upstream and the setup script is not needed — just initialize the workspace normally.
+</details>
 
 ### Build and Flash
 

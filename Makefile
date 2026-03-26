@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 BOARD        ?= rpi_pico2/rp2350a/m33
-ZEPHYR_DIR   ?= $(HOME)/zephyrproject
+ZEPHYR_DIR   ?= $(HOME)/zephyrproject-v4.3
 BUILD_DIR    ?= $(ZEPHYR_DIR)/build
 SRC_DIR      ?= $(CURDIR)
 MOUNT_POINT  ?= /media/$(USER)/RP2350
