@@ -21,35 +21,27 @@ jobs:
         with:
           path: app
 
-      - name: Cache west modules
+      - name: Cache Zephyr SDK
         uses: actions/cache@v4
         with:
-          path: |
-            zephyrproject
-            /opt/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
-            ~/.cache/pip
-          key: west-${{ env.ZEPHYR_VERSION }}-sdk-${{ env.ZEPHYR_SDK_VERSION }}-${{ hashFiles('app/prj.conf') }}
-          restore-keys: |
-            west-${{ env.ZEPHYR_VERSION }}-sdk-${{ env.ZEPHYR_SDK_VERSION }}-
+          path: /opt/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: sdk-${{ env.ZEPHYR_SDK_VERSION }}
 
       - name: Install Zephyr SDK
         run: |
           if [ ! -d "$ZEPHYR_SDK_INSTALL_DIR" ]; then
             wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
             tar xf zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz -C /opt/
+            rm -f zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
             cd $ZEPHYR_SDK_INSTALL_DIR
             ./setup.sh -t arm-zephyr-eabi -c
           fi
 
       - name: Initialize Zephyr workspace
         run: |
-          if [ ! -d zephyrproject/.west ]; then
-            west init -m https://github.com/zephyrproject-rtos/zephyr --mr $ZEPHYR_VERSION zephyrproject
-            cd zephyrproject
-            west update --narrow -o=--depth=1
-          else
-            echo "Using cached workspace"
-          fi
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr $ZEPHYR_VERSION zephyrproject
+          cd zephyrproject
+          west update --narrow -o=--depth=1
 
       - name: Build firmware
         working-directory: zephyrproject
