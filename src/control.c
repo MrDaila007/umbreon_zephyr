@@ -44,12 +44,31 @@ static volatile int64_t last_drv_ms;
 static int stuck_time;
 static float turns;
 
+/* ─── RUN sub-state telemetry ────────────────────────────────────────────── */
+enum run_substate {
+	RUN_CLEAR      = 0,
+	RUN_BLOCKED    = 1,
+	RUN_STUCK_WAIT = 2,
+	RUN_REVERSE    = 3,
+	RUN_WRONG_DIR  = 4,
+};
+static volatile int run_state;
+static int run_telem_div;
+
 /* ─── Heartbeat LED ──────────────────────────────────────────────────────── */
 static const struct gpio_dt_spec heartbeat_led =
 	GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
 /* ─── Wall follow bias ────────────────────────────────────────────────────── */
 #define WALL_FOLLOW_BIAS 800
+
+/* ─── RUN sub-state message ───────────────────────────────────────────────── */
+
+static void send_run_state(int state, int stuck, float trn, int how_clr, int dif)
+{
+	wifi_cmd_printf("$RUN:%d,%d,%.1f,%d,%d\n",
+			state, stuck, (double)trn, how_clr, dif);
+}
 
 /* ─── go_back() ───────────────────────────────────────────────────────────── */
 /* Port from Umbreon_roborace.ino:1060-1084 */
@@ -58,6 +77,7 @@ extern void wdt_feed_kick(void);
 
 static void go_back(void)
 {
+	send_run_state(RUN_REVERSE, stuck_time, turns, 0, 0);
 	car_write_speed(0);
 	int64_t deadline = k_uptime_get() + 2000;
 	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
@@ -73,10 +93,12 @@ static void go_back(void)
 	k_msleep(700);
 	wdt_feed_kick();
 	car_write_speed(0);
+	send_run_state(RUN_REVERSE, 0, turns, 0, 0);
 }
 
 static void go_back_long(void)
 {
+	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
 	car_write_speed(0);
 	int64_t deadline = k_uptime_get() + 2000;
 	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
@@ -92,6 +114,7 @@ static void go_back_long(void)
 	k_msleep(1800);
 	wdt_feed_kick();
 	car_write_speed(0);
+	send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
 }
 
 /* ─── Telemetry ───────────────────────────────────────────────────────────── */
@@ -179,6 +202,23 @@ static void work(void)
 
 	/* ── Telemetry ─────────────────────────────────────────────────────── */
 	send_telemetry(s, (int)(diff * coef), spd);
+
+	/* ── RUN sub-state telemetry ───────────────────────────────────────── */
+	int cur_state;
+	if (stuck_time > 0) {
+		cur_state = RUN_STUCK_WAIT;
+	} else if (how_clear > 0) {
+		cur_state = RUN_BLOCKED;
+	} else {
+		cur_state = RUN_CLEAR;
+	}
+	run_state = cur_state;
+
+	if (++run_telem_div >= 5) {
+		run_telem_div = 0;
+		send_run_state(cur_state, stuck_time, turns,
+			       how_clear, (int)(diff * coef));
+	}
 
 	/* ── Stuck detection ───────────────────────────────────────────────── */
 	bool c_fl = s[IDX_FRONT_LEFT]  < cfg.close_front_dist;
@@ -373,6 +413,8 @@ void control_cmd_start(void)
 	imu_reset_heading();
 	stuck_time = 0;
 	turns = 0.0f;
+	run_telem_div = 0;
+	run_state = RUN_CLEAR;
 	wifi_cmd_send("$ACK\n");
 
 	/* 5-second countdown — idle telemetry flows */

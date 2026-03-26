@@ -123,6 +123,23 @@ at approximately 25 Hz:
 | yaw | °/s | Yaw rate |
 | heading | ° | Integrated heading |
 
+### RUN Sub-State Stream
+
+During autonomous mode, the robot sends sub-state telemetry at 5 Hz (every
+200 ms) plus on entry/exit of recovery maneuvers (`go_back`, wrong-direction):
+
+```
+$RUN:<state>,<stuck_time>,<turns>,<how_clear>,<diff>
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| state | 0–4 | 0=CLEAR, 1=BLOCKED, 2=STUCK_WAIT, 3=REVERSE, 4=WRONG_DIR |
+| stuck_time | int | Stuck counter (cycles, threshold at `STK` setting) |
+| turns | float | Integrated heading change (°), triggers wrong-dir at `WDD` |
+| how_clear | 0–2 | Number of front sensors detecting an obstacle |
+| diff | int | Steering decision value (after coefficient) |
+
 ### Boot Messages
 
 The robot sends status messages during startup:
