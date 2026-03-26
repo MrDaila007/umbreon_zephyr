@@ -22,6 +22,9 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(control, LOG_LEVEL_INF);
 
@@ -75,25 +78,91 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 
 extern void wdt_feed_kick(void);
 
+/* Sensor masks for selective polling during reverse:
+ * Sides (LEFT, RIGHT) for escape direction + alternating one front for clearance */
+#define MASK_SIDES   (BIT(IDX_LEFT) | BIT(IDX_RIGHT))
+#define MASK_FRONT_L (MASK_SIDES | BIT(IDX_FRONT_LEFT))
+#define MASK_FRONT_R (MASK_SIDES | BIT(IDX_FRONT_RIGHT))
+
+/* Minimum reverse distance before checking front clearance (m) */
+#define REVERSE_MIN_DIST  0.13f
+/* Maximum reverse duration (ms) */
+#define REVERSE_TIMEOUT   1500
+
 static void go_back(void)
 {
-	send_run_state(RUN_REVERSE, stuck_time, turns, 0, 0);
+	/* 1. Read side sensors to decide escape direction */
+	int *s = sensors_poll_mask(MASK_SIDES);
+	int left_space  = s[IDX_LEFT];
+	int right_space = s[IDX_RIGHT];
+
+	int escape_steer;
+	if (left_space > right_space + 50) {
+		escape_steer = -600;
+	} else if (right_space > left_space + 50) {
+		escape_steer = 600;
+	} else {
+		/* Sides equal — turn toward inside of race direction */
+		escape_steer = cfg.race_cw ? -600 : 600;
+	}
+
+	send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
+
+	/* 2. Wait for wheels to stop */
 	car_write_speed(0);
 	int64_t deadline = k_uptime_get() + 2000;
 	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
 		wdt_feed_kick();
 		k_msleep(10);
 	}
+
+	/* 3. Reverse with sensor-guided steering */
+	car_write_steer(escape_steer);
+	uint32_t start_count = taho_get_count();
+	int alt = 0;
+
 	car_write_speed(-150);
-	k_msleep(200);
-	wdt_feed_kick();
+	deadline = k_uptime_get() + REVERSE_TIMEOUT;
+
+	while (k_uptime_get() < deadline) {
+		wdt_feed_kick();
+
+		/* Poll sides + one front (alternate FL/FR each cycle) */
+		s = sensors_poll_mask(alt ? MASK_FRONT_R : MASK_FRONT_L);
+		alt = !alt;
+
+		/* Distance traveled (encoder counts → meters) */
+		uint32_t delta = taho_get_count() - start_count;
+		float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
+			     / (float)cfg.encoder_holes;
+
+		/* Front clear? (both FL and FR above threshold) */
+		bool front_clear =
+			s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
+			s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
+
+		if (front_clear && dist >= REVERSE_MIN_DIST) {
+			break;
+		}
+
+		/* Update escape direction from sides */
+		left_space  = s[IDX_LEFT];
+		right_space = s[IDX_RIGHT];
+		if (left_space > right_space + 100) {
+			escape_steer = -600;
+		} else if (right_space > left_space + 100) {
+			escape_steer = 600;
+		}
+		car_write_steer(escape_steer);
+
+		send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
+		k_msleep(10);
+	}
+
 	car_write_speed(0);
-	k_msleep(80);
-	car_write_speed(-150);
-	k_msleep(700);
-	wdt_feed_kick();
-	car_write_speed(0);
-	send_run_state(RUN_REVERSE, 0, turns, 0, 0);
+	/* Keep escape steering for the forward drive that follows */
+	car_write_steer(escape_steer);
+	send_run_state(RUN_REVERSE, 0, turns, 0, escape_steer);
 }
 
 static void go_back_long(void)
@@ -232,9 +301,8 @@ static void work(void)
 	}
 
 	if (stuck_time > cfg.stuck_thresh) {
-		car_write_steer(0);
 		go_back();
-		car_write_speed_ms(2.0f);
+		car_write_speed_ms(spd);
 		stuck_time = 0;
 		imu_reset_heading();
 	}

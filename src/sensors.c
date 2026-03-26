@@ -14,6 +14,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
@@ -73,38 +74,51 @@ void sensors_init(void)
 /* ─── Poll ────────────────────────────────────────────────────────────────── */
 /* Port of Car::read_sensors() from luna_car.h:323-347 */
 
+static void poll_one(int i)
+{
+	if (!vl53_valid[i]) {
+		distances[i] = 9999;
+		return;
+	}
+
+	int rc = sensor_sample_fetch(vl53_devs[i]);
+	if (rc != 0) {
+		return; /* keep previous value on transient error */
+	}
+
+	struct sensor_value val;
+	rc = sensor_channel_get(vl53_devs[i], SENSOR_CHAN_DISTANCE, &val);
+	if (rc != 0) {
+		return;
+	}
+
+	/* Zephyr VL53L0X driver returns distance in meters:
+	 * val.val1 = integer meters, val.val2 = fractional (in micro, i.e. 1e-6)
+	 * Convert to mm: val1*1000 + val2/1000 */
+	int mm = val.val1 * 1000 + val.val2 / 1000;
+	if (mm >= VL53L0X_MAX_RAW || mm <= 0) {
+		distances[i] = 9999;
+	} else {
+		/* mm == cm×10 (identity conversion), cap at MAX_SENSOR_RANGE */
+		distances[i] = (mm < MAX_SENSOR_RANGE) ? mm : MAX_SENSOR_RANGE;
+	}
+}
+
 int *sensors_poll(void)
 {
 	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (!vl53_valid[i]) {
-			distances[i] = 9999;
-			continue;
-		}
+		poll_one(i);
+	}
+	return distances;
+}
 
-		int rc = sensor_sample_fetch(vl53_devs[i]);
-		if (rc != 0) {
-			/* Keep previous value on transient error */
-			continue;
-		}
-
-		struct sensor_value val;
-		rc = sensor_channel_get(vl53_devs[i], SENSOR_CHAN_DISTANCE, &val);
-		if (rc != 0) {
-			continue;
-		}
-
-		/* Zephyr VL53L0X driver returns distance in meters:
-		 * val.val1 = integer meters, val.val2 = fractional (in micro, i.e. 1e-6)
-		 * Convert to mm: val1*1000 + val2/1000 */
-		int mm = val.val1 * 1000 + val.val2 / 1000;
-		if (mm >= VL53L0X_MAX_RAW || mm <= 0) {
-			distances[i] = 9999;
-		} else {
-			/* mm == cm×10 (identity conversion), cap at MAX_SENSOR_RANGE */
-			distances[i] = (mm < MAX_SENSOR_RANGE) ? mm : MAX_SENSOR_RANGE;
+int *sensors_poll_mask(uint8_t mask)
+{
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		if (mask & BIT(i)) {
+			poll_one(i);
 		}
 	}
-
 	return distances;
 }
 
