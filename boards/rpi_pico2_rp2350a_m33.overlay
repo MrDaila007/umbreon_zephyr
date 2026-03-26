@@ -218,6 +218,10 @@
 /* ─── Flash partitions: add NVS storage ──────────────────────────────────── */
 &flash0 {
 	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
 		/* Override code_partition to shrink it, making room for NVS */
 		/delete-node/ partition@100;
 

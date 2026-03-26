@@ -1,7 +1,7 @@
 # Umbreon Zephyr — Autonomous Roborace Firmware
 
 Firmware for the Umbreon autonomous racing robot running on Zephyr RTOS.
-Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 2).
+Targets Zephyr v4.3 (recommended) for RP2350 (Raspberry Pi Pico 2).
 
 ## Hardware
 
@@ -25,39 +25,137 @@ Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 
       ────── FRONT ──────
 ```
 
-## Building
+## Getting Started (from scratch)
 
-### Prerequisites
+### One-command setup
 
-- Zephyr SDK 0.17+ with ARM toolchain
-- Zephyr v4.1 workspace (`~/zephyrproject`)
-
-### Cherry-picks (required for Zephyr v4.1)
-
-The RP2350 flash driver is broken in v4.1 out of the box. Two cherry-picks are required:
+The `setup_zephyr.sh` script installs everything needed on a fresh Linux machine:
 
 ```bash
-# Flash controller support for RP2350
-cd ~/zephyrproject/zephyr
-git cherry-pick --no-commit 5d36e85b99a
-
-# flash_write_partial() for QMI controller
-cd ~/zephyrproject/modules/hal/rpi_pico
-git cherry-pick --no-commit 5d7744c
+git clone <repo-url> && cd umbreon_zephyr
+./setup_zephyr.sh
 ```
 
-These fixes are included in Zephyr v4.3+. Drop the cherry-picks when upgrading.
+This will:
+1. Install system packages (cmake, ninja, dtc, ccache, etc.)
+2. Download and install [Zephyr SDK 0.17](https://github.com/zephyrproject-rtos/sdk-ng) with ARM toolchain
+3. Initialize Zephyr v4.3 workspace at `~/zephyrproject-v4.3`
+4. Create Python venv and install all dependencies
 
-### Build and Flash
+Run `./setup_zephyr.sh --help` for all options.
+
+### Manual setup (step by step)
+
+<details>
+<summary>Click to expand</summary>
+
+#### 1. System packages (Ubuntu/Debian)
 
 ```bash
-cd ~/zephyrproject
-source .venv/bin/activate
+sudo apt-get update
+sudo apt-get install -y git cmake ninja-build python3 python3-pip \
+    python3-venv wget device-tree-compiler ccache dfu-util
+```
+
+#### 2. Zephyr SDK
+
+```bash
+wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
+tar xf zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz -C ~/
+cd ~/zephyr-sdk-0.17.0
+./setup.sh -t arm-zephyr-eabi -c
+```
+
+#### 3. Zephyr workspace
+
+```bash
+pip3 install --user west
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0 ~/zephyrproject-v4.3
+cd ~/zephyrproject-v4.3
+west update --narrow -o=--depth=1
+```
+
+#### 4. Python venv
+
+```bash
+python3 -m venv ~/zephyrproject-v4.3/.venv
+source ~/zephyrproject-v4.3/.venv/bin/activate
+pip install west
+pip install -r ~/zephyrproject-v4.3/zephyr/scripts/requirements.txt
+```
+
+</details>
+
+<details>
+<summary>Legacy: Zephyr v4.1 (requires RP2350 flash patches)</summary>
+
+The RP2350 flash driver is broken in v4.1. The setup script handles this automatically:
+
+```bash
+./setup_zephyr.sh --version v4.1.0 ~/zephyrproject-v4.1
+```
+
+Or apply patches manually to an existing v4.1 workspace:
+
+```bash
+./setup_zephyr.sh --patch-only ~/zephyrproject-v4.1
+```
+
+</details>
+
+### Build
+
+```bash
+make build                  # standard build (UART0 console)
+make build-usb              # USB CDC-ACM console instead
+```
+
+Or manually:
+
+```bash
+cd ~/zephyrproject-v4.3 && source .venv/bin/activate
 west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr
-
-# Hold BOOTSEL, connect USB
-cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/
 ```
+
+### Flash
+
+1. Hold **BOOTSEL** button on Pico 2
+2. Connect USB cable (Pico appears as mass storage `RP2350`)
+3. Run:
+
+```bash
+make flash
+```
+
+Or manually: `cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/`
+
+### Monitor serial console
+
+```bash
+make monitor                # picocom on /dev/ttyACM0 @ 115200
+```
+
+### Run tests
+
+```bash
+make test                   # all tests (host + ztest)
+make test-host              # host unit tests only (no hardware)
+make test-ztest             # Zephyr ztest on native_sim
+```
+
+### Makefile targets reference
+
+| Target | Description |
+|--------|-------------|
+| `make setup` | Run `setup_zephyr.sh` (full environment setup) |
+| `make build` | Build firmware (UART console) |
+| `make build-usb` | Build firmware (USB console) |
+| `make flash` | Copy UF2 to Pico 2 in BOOTSEL mode |
+| `make monitor` | Serial console (picocom) |
+| `make test` | Run all tests |
+| `make test-host` | Host unit tests (gcc, no Zephyr) |
+| `make test-ztest` | Zephyr ztest (native_sim) |
+| `make clean` | Remove build artifacts |
 
 ## Architecture
 

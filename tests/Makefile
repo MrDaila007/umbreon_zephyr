@@ -3,8 +3,8 @@ CFLAGS  := -Wall -Wextra -std=c99 -g -O0 -I.
 LDFLAGS := -lm
 
 # Zephyr workspace
-ZEPHYR_VENV   ?= $(HOME)/zephyrproject/.venv/bin/activate
-ZEPHYR_BASE   ?= $(HOME)/zephyrproject/zephyr
+ZEPHYR_VENV   ?= $(HOME)/zephyrproject-v4.3/.venv/bin/activate
+ZEPHYR_BASE   ?= $(HOME)/zephyrproject-v4.3/zephyr
 ZTEST_SRC     := ztest
 ZTEST_BUILD   := /tmp/umbreon_ztest
 ZTEST_BOARD   := native_sim
