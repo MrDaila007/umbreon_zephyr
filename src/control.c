@@ -58,6 +58,30 @@ enum run_substate {
 static volatile int run_state;
 static int run_telem_div;
 
+/* ─── Sensor masks ───────────────────────────────────────────────────────── */
+#define MASK_SIDES   (BIT(IDX_LEFT) | BIT(IDX_RIGHT))
+#define MASK_FRONT_L (MASK_SIDES | BIT(IDX_FRONT_LEFT))
+#define MASK_FRONT_R (MASK_SIDES | BIT(IDX_FRONT_RIGHT))
+
+/* ─── Sensor rotation ────────────────────────────────────────────────────── */
+/* Always poll LEFT + RIGHT (critical for wall-following).
+ * Rotate one extra sensor per cycle: FL → FR → HL → HR.
+ * 3 sensors/cycle ≈ 100ms vs 6/cycle ≈ 200ms → ~2× faster loop. */
+static int sensor_phase;
+static const uint8_t sensor_extra[] = {
+	BIT(IDX_FRONT_LEFT),
+	BIT(IDX_FRONT_RIGHT),
+	BIT(IDX_HARD_LEFT),
+	BIT(IDX_HARD_RIGHT),
+};
+
+static int *sensors_poll_rotate(void)
+{
+	uint8_t mask = MASK_SIDES | sensor_extra[sensor_phase & 3];
+	sensor_phase++;
+	return sensors_poll_mask(mask);
+}
+
 /* ─── Heartbeat LED ──────────────────────────────────────────────────────── */
 static const struct gpio_dt_spec heartbeat_led =
 	GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
@@ -77,12 +101,6 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 /* Port from Umbreon_roborace.ino:1060-1084 */
 
 extern void wdt_feed_kick(void);
-
-/* Sensor masks for selective polling during reverse:
- * Sides (LEFT, RIGHT) for escape direction + alternating one front for clearance */
-#define MASK_SIDES   (BIT(IDX_LEFT) | BIT(IDX_RIGHT))
-#define MASK_FRONT_L (MASK_SIDES | BIT(IDX_FRONT_LEFT))
-#define MASK_FRONT_R (MASK_SIDES | BIT(IDX_FRONT_RIGHT))
 
 /* Minimum reverse distance before checking front clearance (m) */
 #define REVERSE_MIN_DIST  0.13f
@@ -214,7 +232,7 @@ static void send_idle_telemetry(void)
 
 static void work(void)
 {
-	int *s = sensors_poll();
+	int *s = sensors_poll_rotate();
 	imu_update();
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
@@ -331,7 +349,7 @@ static void work(void)
 
 		int64_t strt = k_uptime_get();
 		while ((k_uptime_get() - strt) < 900) {
-			sensors_poll();
+			sensors_poll_rotate();
 			imu_update();
 			car_pid_control();
 			k_msleep(10);
@@ -345,7 +363,7 @@ static void work(void)
 
 static void work_monitor(void)
 {
-	int *s = sensors_poll();
+	int *s = sensors_poll_rotate();
 	imu_update();
 
 	/* ── Steering (same wall-follow logic as work()) ──────────────── */
@@ -483,6 +501,7 @@ void control_cmd_start(void)
 	turns = 0.0f;
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
+	sensor_phase = 0;
 	wifi_cmd_send("$ACK\n");
 
 	/* 5-second countdown — idle telemetry flows */
@@ -501,6 +520,7 @@ void control_cmd_start(void)
 void control_cmd_monitor(void)
 {
 	imu_reset_heading();
+	sensor_phase = 0;
 	monitor_mode = true;
 	wifi_cmd_send("$ACK\n");
 	wifi_cmd_send("$STS:MONITOR\n");
