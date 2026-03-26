@@ -89,19 +89,27 @@ Settings are not compatible — fresh calibration needed after porting.
 The Arduino version had an SSD1306 OLED with button-based menu.
 This was dropped in the Zephyr port — all configuration is via WiFi commands.
 
-## Build Workarounds (Zephyr v4.1)
+## Zephyr Version Notes
 
-The RP2350 flash driver is broken in Zephyr v4.1. Two cherry-picks are required:
+**Recommended: Zephyr v4.3.0+** — RP2350 flash support is upstream, no patches needed.
 
-1. **Zephyr commit `5d36e85b99a`**: Adds QMI flash controller support for RP2350
-   (removes SSI-specific code that only works on RP2040)
+### v4.1 → v4.3 migration (done 2026-03-26)
 
-2. **HAL commit `5d7744c`**: Adds `flash_write_partial()` implementation for
-   RP2350's QMI flash controller
+- Removed cherry-picks for RP2350 flash (`5d36e85b99a`, `5d7744c`) — now upstream
+- DTS `partitions` node must explicitly declare `compatible = "fixed-partitions"`,
+  `#address-cells = <1>`, `#size-cells = <1>` (optional in v4.1, required in v4.3)
+- CI updated from v4.1 to v4.3, cherry-pick step removed
 
-These are included in Zephyr v4.3+ and can be dropped when upgrading.
+### Legacy: Build workarounds for Zephyr v4.1
 
-Additional Kconfig notes:
+The RP2350 flash driver is broken in Zephyr v4.1. Two cherry-picks were required:
+
+1. **Zephyr commit `5d36e85b99a`**: QMI flash controller support for RP2350
+2. **HAL commit `5d7744c`**: `flash_write_partial()` for QMI controller
+
+These are applied automatically by `./setup_zephyr.sh --version v4.1.0`.
+
+### Kconfig notes
 - `CONFIG_FPU=y` is not needed — RP2350 M33 doesn't declare `CPU_HAS_FPU` in v4.1
 - `CONFIG_CONSOLE=n` and `CONFIG_UART_CONSOLE=n` — UART0 is used for WiFi, not console
 - `CONFIG_FLASH_MAP=y` — required for NVS flash area API
