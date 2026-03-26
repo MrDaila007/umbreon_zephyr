@@ -1,0 +1,112 @@
+# Резервная копия облачного CI (GitHub-hosted ubuntu-latest + Zephyr Docker image).
+# Актуальный пайплайн для локального runner: .github/workflows/build.yml
+#
+# Сохранено: переключение на self-hosted — см. README / docs/self-hosted-ci.md
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  ZEPHYR_VERSION: v4.3.0
+  ZEPHYR_SDK_VERSION: "0.17.0"
+  ZEPHYR_SDK_INSTALL_DIR: /opt/zephyr-sdk-0.17.0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Host unit tests (gcc, no Zephyr) ── runs in parallel with build ───────
+  test-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run host unit tests
+        working-directory: tests
+        run: make test-host
+
+  # ── Firmware build (RP2350) ───────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: sdk-${{ env.ZEPHYR_SDK_VERSION }}
+
+      - name: Install Zephyr SDK
+        run: |
+          if [ ! -d "$ZEPHYR_SDK_INSTALL_DIR" ]; then
+            wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
+            tar xf zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz -C /opt/
+            rm -f zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
+            cd $ZEPHYR_SDK_INSTALL_DIR
+            ./setup.sh -t arm-zephyr-eabi -c
+          fi
+
+      - name: Initialize Zephyr workspace
+        run: |
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr $ZEPHYR_VERSION zephyrproject
+          cd zephyrproject
+          west update --narrow -o=--depth=1
+          pip install -r zephyr/scripts/requirements.txt
+
+      - name: Build firmware
+        working-directory: zephyrproject
+        run: west build -b rpi_pico2/rp2350a/m33 --pristine always $GITHUB_WORKSPACE/app
+
+      - name: Upload UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: zephyrproject/build/zephyr/zephyr.uf2
+
+  # ── Zephyr ztest (native_sim) ── runs after build succeeds ────────────────
+  test-ztest:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: sdk-${{ env.ZEPHYR_SDK_VERSION }}
+
+      - name: Install Zephyr SDK
+        run: |
+          if [ ! -d "$ZEPHYR_SDK_INSTALL_DIR" ]; then
+            wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
+            tar xf zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz -C /opt/
+            rm -f zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz
+            cd $ZEPHYR_SDK_INSTALL_DIR
+            ./setup.sh -t arm-zephyr-eabi -c
+          fi
+
+      - name: Initialize Zephyr workspace
+        run: |
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr $ZEPHYR_VERSION zephyrproject
+          cd zephyrproject
+          west update --narrow -o=--depth=1
+          pip install -r zephyr/scripts/requirements.txt
+
+      - name: Run ztest
+        working-directory: zephyrproject
+        run: |
+          west build -b native_sim -d /tmp/ztest $GITHUB_WORKSPACE/app/tests/ztest
+          /tmp/ztest/zephyr/zephyr.exe
