@@ -258,7 +258,9 @@ deactivate
 
 Альтернатива без `pip install virtualenv` в venv: перед `./install.sh` выполнить **`deactivate`**, в системе **`sudo apt install -y python3-virtualenv`**, затем снова **`./install.sh`** (системный `python3` подхватит пакет `virtualenv`).
 
-`install.sh` ставит Xtensa toolchain в `~/.espressif/tools/xtensa-lx106-elf/`. Проверьте, что **имя каталога версии** совпадает с переменной `TOOLCHAIN` в `Makefile` в корне **umbreon_esp_web** (строка с `esp-2020r3-...`). Если `install.sh` положил другую версию — обновите строку `TOOLCHAIN` в `Makefile` или зафиксируйте версию SDK/toolchain как в документации Espressif.
+`install.sh` ставит Xtensa toolchain в `~/.espressif/tools/xtensa-lx106-elf/` и Python-окружение в `~/.espressif/python_env/rtos*_py*_env`. Если при **`source export.sh`** падает **`check_python_dependencies` / `pkg_resources`**, при уже установленном setuptools откатите setuptools до ветки **ниже 82-й** (скрипты SDK конфликтуют с **setuptools 82** и Python 3.12): после `eval "$(python3 ~/ESP8266_RTOS_SDK/tools/idf_tools.py export)"` выполните `python3 -m pip install -U 'setuptools>=69,<82'`.
+
+Проверьте, что **имя каталога версии** toolchain совпадает с переменной `TOOLCHAIN` в `Makefile` в корне **umbreon_esp_web** (строка с `esp-2020r3-...`). Если `install.sh` положил другую версию — обновите строку `TOOLCHAIN` в `Makefile` или зафиксируйте версию SDK/toolchain как в документации Espressif.
 
 Проверка:
 
@@ -271,7 +273,42 @@ cd ~/path/to/umbreon_esp_web && make all
 #### Один раннер на Zephyr и ESP8266
 
 - **Runner уровня организации** — один и тот же runner обслуживает все репозитории org (удобнее всего).
-- **Runner привязан к одному репо** — для второго репозитория: **Settings → Actions → Runners → New self-hosted runner** и на **той же машине** второй каталог, например `~/actions-runner-esp-web`, второй `./config.sh` с URL второго репо и теми же labels `self-hosted,linux,embedded`; затем `./svc.sh install runner` (будет второй systemd unit). Либо перенесите оба репозитория в org и используйте один org runner.
+- **Два репозитория, два repo-level runner’а** — на **той же виртуалке** можно поставить **второй** агент (отдельная папка, отдельная регистрация, второй systemd unit). Оба используют один и тот же `$HOME` (`~/zephyrproject`, `~/ESP8266_RTOS_SDK`).
+
+##### Второй runner на той же VM (пример: `umbreon_esp_web`)
+
+1. На GitHub: **umbreon_esp_web → Settings → Actions → Runners → New self-hosted runner** — скопировать токен (одноразовый).
+2. Под пользователем **`runner`** (первый runner уже в `~/actions-runner`, его не трогаем):
+
+```bash
+su - runner
+mkdir ~/actions-runner-esp-web && cd ~/actions-runner-esp-web
+curl -O -L https://github.com/actions/runner/releases/download/v2.333.0/actions-runner-linux-x64-2.333.0.tar.gz
+tar xzf actions-runner-linux-x64-2.333.0.tar.gz
+rm actions-runner-linux-x64-2.333.0.tar.gz
+
+./config.sh \
+    --url https://github.com/<OWNER>/umbreon_esp_web \
+    --token <TOKEN_FROM_GITHUB> \
+    --name proxmox-runner-esp-web \
+    --labels self-hosted,linux,x64,embedded \
+    --work _work
+```
+
+Имя **`--name`** должно быть **уникальным** среди runner’ов в аккаунте; labels должны совпадать с `runs-on` в workflow.
+
+3. Установить сервис (из-под root или с `sudo`):
+
+```bash
+exit   # если были root
+sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh install runner && ./svc.sh start'
+```
+
+Либо зайти в `su - runner`, `cd ~/actions-runner-esp-web`, `./svc.sh install runner`, `./svc.sh start` — если политика sudo позволяет.
+
+4. В GitHub → **Runners** у репозитория **umbreon_esp_web** должен появиться runner **Idle** (зелёный).
+
+Два процесса на одной машине делят CPU/RAM и каталог `_work`; если оба репо запустят job одновременно, они могут конкурировать — для домашнего CI обычно нормально.
 
 ---
 
@@ -279,6 +316,7 @@ cd ~/path/to/umbreon_esp_web && make all
 
 - **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject` (§3.5).
 - **umbreon_esp_web:** [`umbreon_esp_web/.github/workflows/build.yml`](../../umbreon_esp_web/.github/workflows/build.yml) — тот же `runs-on`, `~/ESP8266_RTOS_SDK` (§3.6).
+- **Umbreon_roborace:** [`Umbreon_roborace/.github/workflows/ci.yml`](../../Umbreon_roborace/.github/workflows/ci.yml) — Arduino/Python/Docker; см. [`Umbreon_roborace/docs/self-hosted-ci.md`](../../Umbreon_roborace/docs/self-hosted-ci.md).
 - **Резервная копия облачного Zephyr CI:** [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml).
 
 У раннера в `config.sh` / настройках GitHub должны быть те же labels: `self-hosted`, `linux`, `embedded`.
