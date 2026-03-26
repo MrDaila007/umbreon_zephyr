@@ -32,21 +32,19 @@ Ported from Arduino (arduino-pico) to Zephyr v4.1 for RP2350 (Raspberry Pi Pico 
 - Zephyr SDK 0.17+ with ARM toolchain
 - Zephyr v4.1 workspace (`~/zephyrproject`)
 
-### Cherry-picks (required for Zephyr v4.1)
+### Quick Setup (Zephyr v4.1 only)
 
-The RP2350 flash driver is broken in v4.1 out of the box. Two cherry-picks are required:
+The RP2350 flash driver is broken in Zephyr v4.1 out of the box. The setup script
+initializes the workspace and applies the required patches automatically:
 
 ```bash
-# Flash controller support for RP2350
-cd ~/zephyrproject/zephyr
-git cherry-pick --no-commit 5d36e85b99a
-
-# flash_write_partial() for QMI controller
-cd ~/zephyrproject/modules/hal/rpi_pico
-git cherry-pick --no-commit 5d7744c
+./setup_zephyr.sh              # full setup (workspace + patches)
+./setup_zephyr.sh --patch-only # patches only (existing workspace)
+./setup_zephyr.sh ~/my/path    # custom workspace path
 ```
 
-These fixes are included in Zephyr v4.3+. Drop the cherry-picks when upgrading.
+> **Note:** If you are using Zephyr v4.3 or newer, the patches are already included
+> upstream and the setup script is not needed — just initialize the workspace normally.
 
 ### Build and Flash
 

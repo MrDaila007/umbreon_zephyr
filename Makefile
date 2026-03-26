@@ -8,7 +8,10 @@ MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
 BAUD         ?= 115200
 
-.PHONY: build build-usb flash monitor clean test test-host test-ztest
+.PHONY: setup build build-usb flash monitor clean test test-host test-ztest
+
+setup:
+	./setup_zephyr.sh $(ZEPHYR_DIR)
 
 build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
