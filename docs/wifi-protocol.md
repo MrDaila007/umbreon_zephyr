@@ -31,7 +31,7 @@ on the track. The robot begins driving when the countdown expires.
 
 | Command | Response | Description |
 |---------|----------|-------------|
-| `$GET` | `$CFG:KEY=VAL,...` | Dump all 31 parameters |
+| `$GET` | `$CFG:KEY=VAL,...` | Dump all runtime parameters (see table below) |
 | `$SET:KEY=VAL,...` | `$ACK` or `$NAK` | Set one or more parameters |
 | `$SAVE` | `$ACK` | Persist current settings to NVS flash |
 | `$LOAD` | `$ACK` | Reload settings from NVS |
@@ -81,12 +81,15 @@ WiFi with the `$L:` prefix: `$L:message text here`.
 | `$TEST:taho` | Display tachometer readings for 5 s |
 | `$TEST:esc` | Ramp ESC speed up and down |
 | `$TEST:speed` | PID step response test |
-| `$TEST:autotune` | PID auto-tuning (Ziegler-Nichols) |
+| `$TEST:autotune` | PID auto-tuning (Ziegler–Nichols style, wheels up) |
+| `$TEST:pidtune` | On-track FOPDT + IMC/PI suggestions (car on track, reactive steer) |
 | `$TEST:reactive` | Reactive steering test (no PID) |
 | `$TEST:cal` | ESC calibration sequence |
 
-Tests run in the control thread context. The robot should be safely elevated
-(wheels off ground) for motor tests.
+**Motor tests:** elevate the car for `esc`, `speed`, `autotune`. **`pidtune`** is
+meant for the real track (low-speed steps, safety speed cut at ~0.5 m/s).
+
+Tests run in the WiFi command thread context (`k_msleep` yields to other work).
 
 ### Track Learning
 
@@ -131,33 +134,45 @@ $BOOT:READY,UP=4200         # Boot complete, uptime in ms
 
 ## Configuration Parameters
 
-| Key | Description | Default | Unit |
-|-----|-------------|---------|------|
-| FOD | Front obstacle distance | 700 | mm |
-| SOD | Side open distance | 900 | mm |
-| ACD | All-close distance | 200 | mm |
-| CFD | Close front distance | 300 | mm |
-| KP | PID proportional gain | 60 | — |
-| KI | PID integral gain | 40 | — |
-| KD | PID derivative gain | 6 | — |
-| MSP | Min ESC speed (forward) | 1520 | µs |
-| XSP | Max ESC speed (forward) | 1700 | µs |
-| BSP | Min reverse speed | 1460 | µs |
-| MNP | Min servo angle | 40 | ° |
-| XNP | Max servo angle | 140 | ° |
+Compile-time defaults are in `src/settings.c` (`set_defaults()`). **`$LOAD`**
+restores last **`$SAVE`** blob; **`$RST`** resets to these defaults. NVS format
+version may bump when new fields are added — old saves are rejected until you
+re-save.
+
+| Key | Description | Typical default | Unit |
+|-----|-------------|-----------------|------|
+| FOD | Front obstacle threshold | 800 | sensor units (see `settings.h`; same scale as `$SNS`) |
+| SOD | Side “open” threshold | 600 | sensor units |
+| ACD | All-close threshold | 400 | sensor units |
+| CFD | Close-front (stuck) threshold | 150 | sensor units |
+| KP | PID proportional gain | *from pidtune* | — |
+| KI | PID integral gain | *from pidtune* | — |
+| KD | PID derivative gain | *from pidtune* | — |
+| MSP | Min forward ESC (feedforward / PID floor) | 1540 | µs |
+| XSP | Max forward ESC | 1600 | µs |
+| BSP | Reverse ESC | 1460 | µs |
+| MNP | Min servo angle | 60 | ° |
+| XNP | Max servo angle | 120 | ° |
 | NTP | Neutral servo angle | 90 | ° |
-| ENH | Encoder holes | 62 | — |
+| ENH | Encoder holes per rev | 68 | — |
 | WDM | Wheel diameter | 0.060 | m |
 | LMS | Control loop period | 40 | ms |
-| SPD1 | Speed (path clear) | 2.7 | m/s |
-| SPD2 | Speed (path blocked) | 0.8 | m/s |
-| COE1 | Steering coef (clear) | 0.3 | — |
-| COE2 | Steering coef (blocked) | 0.7 | — |
+| SPD1 | Speed (path clear) | 0.48 | m/s |
+| SPD2 | Speed (path blocked) | 0.32 | m/s |
+| SLW | Setpoint slew rate | 0.85 | m/s per s (`0` = off) |
+| KOP | Start-kick strength | 18 | % of `(XSP−MSP)` span (`0` = off) |
+| KOM | Start-kick duration | 300 | ms |
+| COE1 | Steering coef (clear) | 0.28 | — |
+| COE2 | Steering coef (blocked) | 0.65 | — |
 | WDD | Wrong direction threshold | 120 | ° |
 | RCW | Race clockwise | 1 | bool |
 | STK | Stuck threshold | 25 | ticks |
+| IMR | IMU use in navigation | 1 | bool |
 | SVR | Servo reverse | 0 | bool |
 | CAL | ESC calibrated | 0 | bool |
-| BEN | Battery monitoring enabled | 1 | bool |
-| BML | Battery voltage multiplier | 2.8 | — |
+| BEN | Battery monitoring enabled | 0 | bool |
+| BML | Battery voltage multiplier | 4.85 | — (calibrate for your divider) |
 | BLV | Battery low voltage cutoff | 6.0 | V |
+
+Read-only keys appended on `$GET` (not writable via `$SET`): `IMU`, `DBG`, `SNS`,
+`SMX`, `FWV`.

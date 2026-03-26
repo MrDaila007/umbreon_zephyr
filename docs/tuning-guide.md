@@ -22,10 +22,21 @@ Parameters: `KP`, `KI`, `KD`
 | Steady-state speed error | Increase KI |
 | Motor buzzing / jerky | Decrease KI, increase KD |
 
-### Auto-tune
+### PID tune (on-track, recommended for drive mode)
+
+`$TEST:pidtune` runs open-loop ESC steps on the **track** (reactive steering on),
+fits a simple FOPDT model per step, then prints **IMC** and **PI** gains over WiFi.
+Use **Apply PI** in the web UI for a calmer low-speed loop, or **IMC** if you want
+derivative from the tuner. Always verify on the ground and **`$SAVE`** when happy.
+
+Defaults in flash were seeded from a real pidtune log; **re-run after ESC, wheel,
+or gearing changes**.
+
+### Auto-tune (bench)
 
 Run `$TEST:autotune` with the robot elevated (wheels off ground).
-This performs a Ziegler-Nichols step response test and suggests gains.
+This performs a Ziegler–Nichols-style step test and suggests gains (different
+method than pidtune).
 
 ### Manual procedure
 
@@ -49,29 +60,46 @@ Set `SVR=1` if the servo is mounted in reverse orientation.
 
 ### Steering Aggressiveness (COE1, COE2)
 
-- `COE1` (default 0.3): coefficient when path is clear — lower = smoother
-- `COE2` (default 0.7): coefficient when blocked — higher = sharper turns
+- `COE1`: coefficient when path is clear — lower = smoother straights
+- `COE2`: coefficient when blocked — higher = sharper turns
 
-If the robot clips walls on corners, increase COE2.
-If it weaves on straights, decrease COE1.
+Defaults (~**0.28** / **0.65**) match low-speed cruise; increase COE2 if the car
+misses apexes, decrease COE1 if it weaves.
 
 ## Speed Tuning
 
 ### Target Speeds (SPD1, SPD2)
 
-- `SPD1` (default 2.7 m/s): speed on clear straights
-- `SPD2` (default 0.8 m/s): speed when obstacles ahead
+- `SPD1`: target speed when the path ahead is **clear** (m/s)
+- `SPD2`: target when **front obstacle** logic selects “slow” (m/s)
 
-Start conservative (SPD1=1.5, SPD2=0.5), increase gradually.
+Factory defaults are conservative (~**0.48** / **0.32** m/s) for bring-up; raise
+gradually for faster laps once PID and steering are stable.
+
+### Setpoint slew (SLW)
+
+`SLW` limits how fast the **PID speed setpoint** can move (m/s per second).
+**0** = instant step (old behavior). A value around **0.8–1.2** softens starts
+and SPD1↔SPD2 transitions. Feedforward follows the slewed setpoint.
+
+### Start kick (KOP, KOM)
+
+Short **extra ESC pulse** when commanding forward from rest:
+
+- `KOP`: percent of **(XSP − MSP)** span added as µs (capped in firmware)
+- `KOM`: duration in **ms**; ends early when measured speed reaches ~78% of setpoint
+- `KOP = 0` disables kick
+
+Use a small kick if the car is lazy off the line; reduce if it lurches.
 
 ### ESC Limits (MSP, XSP, BSP)
 
-- `MSP` (default 1520 µs): minimum forward pulse (motor dead zone)
-- `XSP` (default 1700 µs): maximum forward pulse (top speed cap)
-- `BSP` (default 1460 µs): reverse pulse
+- `MSP`: minimum forward pulse (µs) — clears motor dead zone with feedforward
+- `XSP`: maximum forward pulse (µs) — top speed cap for PID
+- `BSP`: reverse pulse (µs)
 
-If the motor doesn't start at low speeds, decrease MSP.
-If top speed is too high, decrease XSP.
+If the motor doesn't start at low speeds, **increase MSP** slightly. If top speed
+is too high, **decrease XSP**. Kick strength scales with **(XSP − MSP)**.
 
 ## Obstacle Detection
 
@@ -79,10 +107,13 @@ If top speed is too high, decrease XSP.
 
 | Parameter | Purpose | Increase if... | Decrease if... |
 |-----------|---------|----------------|----------------|
-| FOD (700) | Front obstacle — triggers slowdown | Braking too late | Braking too early |
-| SOD (900) | Side open — wall-follow bias | Missing wide openings | False open detection |
-| ACD (200) | All-close — emergency zone | — | Too cautious |
-| CFD (300) | Close front — stuck detection | Not detecting walls | False stuck triggers |
+| FOD | Front obstacle — triggers slowdown | Braking too late | Braking too early |
+| SOD | Side open — wall-follow bias | Missing wide openings | False open detection |
+| ACD | All-close — emergency zone | — | Too cautious |
+| CFD | Close front — stuck detection | Not detecting walls | False stuck triggers |
+
+Default numeric values are in `settings.h` (`DEFAULT_FOD`, etc.); compare readings
+with `$SNS` when tuning.
 
 ## Race Direction
 
@@ -120,6 +151,8 @@ allowing anticipatory braking before turns.
 
 ## Battery
 
-- `BLV` (default 6.0 V): low-voltage cutoff — robot stops if sustained 10 s
-- `BML` (default 2.8): voltage divider multiplier — calibrate with multimeter
-- `BEN` (default 1): set to 0 to disable monitoring (bench testing)
+- `BEN`: battery monitoring **on/off** (default **off** in NVS defaults — enable for packs)
+- `BML`: voltage divider multiplier — **calibrate with a multimeter** on your divider
+- `BLV`: low-voltage cutoff (V) — sustained low voltage triggers stop after ~10 s
+
+In the web UI, battery fields are under **Settings → ⚡ Battery** (after **Read** / `$GET`).
