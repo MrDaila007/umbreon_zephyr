@@ -51,43 +51,51 @@ steer = diff * steering_coefficient
 ```
 
 The steering coefficient adapts to the situation:
-- **Clear path** (front distance ≥ FOD): `coef = COE1` (default 0.3) — gentle turns
-- **Blocked path** (front distance < FOD): `coef = COE2` (default 0.7) — aggressive turns
+- **Clear path** (front distance ≥ FOD): `coef = COE1` — gentle turns
+- **Blocked path** (front distance < FOD): `coef = COE2` — sharper turns
+
+See `settings.c` for current defaults (`COE1` / `COE2`).
 
 ## Speed Selection
 
 | Condition | Target Speed | Description |
 |-----------|-------------|-------------|
-| Front clear (≥ FOD) | SPD1 (2.7 m/s) | Full speed straight |
-| Front blocked (< FOD) | SPD2 (0.8 m/s) | Slow for turn |
+| Front clear (≥ FOD) | SPD1 | Straight / clear-path cruise (m/s) |
+| Front blocked (< FOD) | SPD2 | Slow segment for turns (m/s) |
 | Track learning active | Learned profile | Anticipatory braking |
+
+`car_write_speed_ms()` receives this target each loop. Optional **`spd_slew` (SLW)**
+limits how fast the **internal setpoint** ramps toward that target (m/s² of
+reference motion). **`0`** disables slew (instant command).
 
 ## PID Speed Controller
 
-The PID controller runs every control loop iteration (40 ms):
+The PID controller runs every control loop iteration (40 ms). Measured speed
+comes from the encoder (`taho`) and wheel diameter; it is **EMA-filtered** (α=0.7).
 
 ```
-error = target_speed - measured_speed
+ref = slew_limited_setpoint(target_speed, spd_slew)   # optional ramp
+error = ref - filtered_speed
 
-# EMA filter on speed (α = 0.7)
-filtered_speed = 0.7 * current + 0.3 * previous
+# Integral on error; integral state clamped to ±50
+I_state += error * dt
 
-# PID terms
-P = Kp * error
-I = I_prev + Ki * error * dt    # clamped to ±50
-D = Kd * (error - prev_error) / dt
+# Derivative on measurement (reduces kick when ref steps)
+D = -Kd * (filtered_speed - prev_filtered) / dt
 
-# Feedforward: jump past motor dead zone
-ff = (target > 0) ? min_esc_speed : neutral
+ff = (ref > threshold) ? (MSP - neutral_us) : 0
+output = ff + Kp*error + Ki*I_state + D
 
-output = ff + P + I + D
-output = clamp(output, min_esc_speed, max_esc_speed)
+# Optional start kick for KOM ms after forward edge from rest (KOP % of XSP-MSP)
+output += kick_boost(...)
+
+esc = neutral + output  → clamp to [neutral, XSP]
 ```
 
-Default gains: Kp=60, Ki=40, Kd=6.
+Default gains are set from on-track **`$TEST:pidtune`** logs (see `settings.c`);
+re-tune after mechanical or ESC changes.
 
-The tachometer provides speed feedback via optical encoder pulses. Speed is
-calculated from the interval between consecutive rising edges.
+The tachometer provides speed feedback via optical encoder pulses.
 
 ## Stuck Detection
 

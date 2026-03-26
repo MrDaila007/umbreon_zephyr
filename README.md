@@ -104,7 +104,7 @@ All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, 
 
 | Command | Description |
 |---------|-------------|
-| `$GET` | Retrieve all 31 parameters |
+| `$GET` | Retrieve all parameters (`$CFG:...`) |
 | `$SET:KEY=VAL,...` | Set parameters (e.g. `$SET:MNP=60,XNP=120`) |
 | `$SAVE` | Persist to NVS flash |
 | `$LOAD` | Load from NVS |
@@ -125,7 +125,7 @@ All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, 
 | Command | Description |
 |---------|-------------|
 | `$BAT` | Battery voltage |
-| `$TEST:name` | Run test (lidar, servo, taho, esc, speed, autotune, reactive, cal) |
+| `$TEST:name` | Run test (lidar, servo, taho, esc, speed, autotune, **pidtune**, reactive, cal) |
 | `$DIAG` | Overall system diagnostics |
 | `$SNS` | Raw sensor readings |
 | `$IMU` | IMU state (yaw rate, heading) |
@@ -153,39 +153,24 @@ CSV stream at ~25 Hz:
 
 ## Configuration Parameters ($GET/$SET)
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| FOD | Front obstacle distance (mm) | 700 |
-| SOD | Side open distance (mm) | 900 |
-| ACD | All-close distance (mm) | 200 |
-| CFD | Close front distance (mm) | 300 |
-| KP/KI/KD | PID gains | 60/40/6 |
-| MSP/XSP | Min/max ESC speed | 1520/1700 |
-| BSP | Min reverse speed | 1460 |
-| MNP/XNP/NTP | Min/max/neutral servo angle | 40/140/90 |
-| ENH | Encoder holes | 62 |
-| WDM | Wheel diameter (m) | 0.060 |
-| LMS | Control loop period (ms) | 40 |
-| SPD1/SPD2 | Speed clear/blocked (m/s) | 2.7/0.8 |
-| COE1/COE2 | Steering coefficient clear/blocked | 0.3/0.7 |
-| WDD | Wrong direction threshold (degrees) | 120 |
-| RCW | Race clockwise | 1 |
-| STK | Stuck threshold (ticks) | 25 |
-| SVR | Servo reverse | 0 |
-| CAL | ESC calibration done | 0 |
-| BEN/BML/BLV | Battery: enabled/multiplier/low threshold (V) | 1/2.8/6.0 |
+Authoritative defaults and new keys are in **`src/settings.c`** and
+**[docs/wifi-protocol.md](docs/wifi-protocol.md)**. Summary:
 
-## TODO — Not yet ported from Arduino
+| Key | Description | Default (see `settings.c`) |
+|-----|-------------|----------------------------|
+| FOD/SOD/ACD/CFD | Obstacle / stuck thresholds | `DEFAULT_*` in `settings.h` |
+| KP/KI/KD | PID gains | From on-track pidtune seed |
+| MSP/XSP/BSP | ESC µs limits | 1540 / 1600 / 1460 |
+| MNP/XNP/NTP | Servo limits (°) | 60 / 120 / 90 |
+| ENH / WDM | Encoder / wheel | 68 / 0.060 m |
+| LMS | Loop period (ms) | 40 |
+| SPD1 / SPD2 | Cruise speeds (m/s) | ~0.48 / 0.32 |
+| SLW | Setpoint slew (m/s per s; 0=off) | 0.85 |
+| KOP / KOM | Start kick % / ms (KOP 0=off) | 18 / 300 |
+| COE1/COE2 | Steering gain clear/blocked | 0.28 / 0.65 |
+| WDD / RCW / STK / IMR / SVR / CAL | Navigation & hardware flags | see `settings.c` |
+| BEN / BML / BLV | Battery monitor / scale / low (V) | 0 / 4.85 / 6.0 |
 
-### Major
+## TODO
 
-- [ ] **OLED menu + rotary encoder** — 10-screen state machine (dashboard, settings, tests, info) on SSD1306 128×64. Arduino: `menu.h` (943 lines). No display driver or encoder handling in Zephyr yet
-- [ ] **Dual-core (Core 1)** — Arduino uses Core 1 for OLED/encoder (`core1.h`, `setup1()`/`loop1()`). Zephyr runs everything as threads on a single core, second RP2350 core is idle
-- [ ] **TF-Luna 4× LiDAR** — 4 UART lidars via SerialPIO (`luna_car.h`). Zephyr only supports 6× VL53L0X, no flexible sensor selection
-
-### Minor
-
-- [ ] **Compile-time sensor config** — Arduino: `sensor_config.h` allows switching between 4×Luna and 6×VL53L0X via `SENSOR_CONFIG`. Zephyr hardcodes 6× VL53L0X
-- [ ] **Competition mode** — Auto-start flag without menu/WiFi for races
-- [ ] **I2C bus recovery (bit-bang)** — Manual I2C1 bus recovery via SCL toggling. Zephyr uses `i2c_recover_bus()` (less reliable)
-- [ ] **Battery sustained low-voltage cutoff** — Arduino cuts motor after 10 seconds of sustained low voltage. Zephyr only does a one-shot check
+See [docs/TODO.md](docs/TODO.md) for the full backlog.

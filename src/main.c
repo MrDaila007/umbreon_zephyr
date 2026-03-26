@@ -9,6 +9,11 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 
+#if defined(CONFIG_USB_DEVICE_STACK)
+#include <zephyr/usb/usb_device.h>
+#include <zephyr/drivers/uart.h>
+#endif
+
 #include "settings.h"
 #include "car.h"
 #include "tachometer.h"
@@ -19,6 +24,8 @@
 #include "battery.h"
 #include "tests.h"
 #include "track_learn.h"
+#include "encoder.h"
+#include "display.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -84,9 +91,36 @@ static void blink_led(int count, int ms)
 	}
 }
 
+/* ─── USB console init (when USB_CONSOLE=ON) ───────────────────────────────── */
+#if defined(CONFIG_USB_DEVICE_STACK)
+static void usb_console_init(void)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+
+	if (!device_is_ready(dev)) {
+		return;
+	}
+
+	usb_enable(NULL);
+
+	/* Wait up to 3s for host to open serial port (DTR) */
+	uint32_t dtr = 0;
+	int64_t deadline = k_uptime_get() + 3000;
+
+	while (!dtr && k_uptime_get() < deadline) {
+		uart_line_ctrl_get(dev, UART_LINE_CTRL_DTR, &dtr);
+		k_msleep(50);
+	}
+}
+#endif
+
 /* ─── Main ──────────────────────────────────────────────────────────────────── */
 int main(void)
 {
+#if defined(CONFIG_USB_DEVICE_STACK)
+	usb_console_init();
+#endif
+
 	printk("\n");
 	printk("==============================\n");
 	printk("  Umbreon Zephyr v%s\n", FW_VERSION);
@@ -96,15 +130,22 @@ int main(void)
 	settings_init();
 	settings_load();
 
+	/* Start watchdog early to protect init sequence */
+	wdt_init();
+
 	/* Initialize hardware subsystems */
 	car_init();
 	taho_init();
-	sensors_init();
+	sensors_init();      /* ~500 ms I2C probing */
 	imu_init();
-	imu_calibrate();
+	wdt_feed_kick();
+	imu_calibrate();     /* ~1 sec */
+	wdt_feed_kick();
 	battery_init();
 	wifi_cmd_init();
 	track_learn_init();
+	encoder_init();
+	display_init();
 
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */
@@ -112,15 +153,13 @@ int main(void)
 			sensors_online_count(), FW_VERSION);
 
 	/* ESC calibration on first boot */
+	wdt_feed_kick();
 	if (!cfg.calibrated) {
-		car_run_calibration();
+		car_run_calibration(); /* feeds wdt internally */
 	} else {
 		/* Allow ESC to arm and sensors to start */
 		k_msleep(3700);
 	}
-
-	/* Start watchdog */
-	wdt_init();
 
 	/* Start control thread */
 	control_init();

@@ -13,6 +13,9 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 
@@ -50,7 +53,7 @@ void imu_init(void)
 	}
 
 	mpu_ok = true;
-	prev_us = k_cyc_to_us_floor64(k_cycle_get_32());
+	prev_us = k_ticks_to_us_floor64(k_uptime_ticks());
 	LOG_INF("MPU-6050 init OK");
 }
 
@@ -85,7 +88,7 @@ void imu_calibrate(void)
 		/* Zephyr returns gyro in rad/s as sensor_value.
 		 * Convert to °/s: val_rad * (180/π) */
 		float rad_s = sensor_value_to_float(&val);
-		float deg_s = rad_s * (180.0f / 3.14159265f);
+		float deg_s = rad_s * (180.0f / (float)M_PI);
 		sum += deg_s;
 		count++;
 
@@ -120,7 +123,7 @@ void imu_update(void)
 	}
 
 	/* Convert rad/s → °/s, subtract bias */
-	float raw_rate = sensor_value_to_float(&val) * (180.0f / 3.14159265f) - gyro_bias;
+	float raw_rate = sensor_value_to_float(&val) * (180.0f / (float)M_PI) - gyro_bias;
 
 	if (cfg.imu_rotate) {
 		raw_rate = -raw_rate;
@@ -135,12 +138,15 @@ void imu_update(void)
 	yaw_rate = IMU_EMA_ALPHA * raw_rate + (1.0f - IMU_EMA_ALPHA) * yaw_rate;
 
 	/* Integrate heading */
-	int64_t now = k_cyc_to_us_floor64(k_cycle_get_32());
+	int64_t now = k_ticks_to_us_floor64(k_uptime_ticks());
 	float dt = (now - prev_us) / 1e6f;
 	prev_us = now;
 
 	if (dt > 0.0f && dt < 0.5f) {
 		heading += yaw_rate * dt;
+		if (heading > 360.0f || heading < -360.0f) {
+			heading = fmodf(heading, 360.0f);
+		}
 	}
 }
 

@@ -19,6 +19,9 @@
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(track_learn, LOG_LEVEL_INF);
 
@@ -48,7 +51,7 @@ struct __attribute__((packed)) track_header {
 /* ─── State ───────────────────────────────────────────────────────────────── */
 static struct track_point  trk_points[TRK_MAX_POINTS];
 static struct track_header trk_hdr;
-static int trk_mode = TRK_MODE_IDLE;
+static volatile int trk_mode = TRK_MODE_IDLE;
 
 static float trk_odo_m;
 static float trk_last_sample_m;
@@ -63,7 +66,7 @@ static float trk_get_odo_m(void)
 {
 	uint32_t counts = taho_get_count() - trk_taho_start;
 	if (cfg.encoder_holes <= 0) return 0.0f;
-	return (counts * 3.14159265f * cfg.wheel_diam_m) / (float)cfg.encoder_holes;
+	return (counts * (float)M_PI * cfg.wheel_diam_m) / (float)cfg.encoder_holes;
 }
 
 /* ─── Checksum ────────────────────────────────────────────────────────────── */

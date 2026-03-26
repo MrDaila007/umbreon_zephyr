@@ -1,7 +1,7 @@
 /*
  * settings.c — Persistent configuration via Zephyr NVS
  *
- * Stores 31 runtime-configurable parameters to flash.
+ * Stores 34 runtime-configurable parameters to flash.
  * NVS key 1 = CarSettings blob + checksum.
  */
 
@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   6
+#define SETTINGS_VERSION   8
 
 static struct nvs_fs nvs;
 static bool nvs_ready;
@@ -52,6 +52,9 @@ struct __attribute__((packed)) nvs_settings {
 	int8_t   loop_ms;
 	float    spd_clear;
 	float    spd_blocked;
+	float    spd_slew;
+	float    kick_pct;
+	int16_t  kick_ms;
 	float    coe_clear;
 	float    coe_blocked;
 	float    wrong_dir_deg;
@@ -76,22 +79,29 @@ static void set_defaults(void)
 	cfg.side_open_dist      = DEFAULT_SOD;
 	cfg.all_close_dist      = DEFAULT_ACD;
 	cfg.close_front_dist    = DEFAULT_CFD;
-	cfg.pid_kp   = 60.0f;
-	cfg.pid_ki   = 40.0f;
-	cfg.pid_kd   = 6.0f;
+	/* PID from $TEST:pidtune logs (2026-03-26): runs 2–3 where best=1 had real τ;
+	 * PI rows averaged (66.21/264.86 and 66.64/222.13); KD from run-3 IMC (4.16).
+	 * Skipped run-1 best=2 (τ floor 0.05 s → unrealistic KI). Re-tune after hardware change. */
+	cfg.pid_kp   = 66.4f;
+	cfg.pid_ki   = 243.5f;
+	cfg.pid_kd   = 4.16f;
 	cfg.min_speed   = 1540;
-	cfg.max_speed   = 1700;
+	cfg.max_speed   = 1600;
 	cfg.min_bspeed  = 1460;
-	cfg.min_point     = 40;
-	cfg.max_point     = 140;
+	cfg.min_point     = 60;
+	cfg.max_point     = 120;
 	cfg.neutral_point = 90;
-	cfg.encoder_holes = 62;
+	cfg.encoder_holes = 68;
 	cfg.wheel_diam_m  = 0.060f;
 	cfg.loop_ms       = 40;
-	cfg.spd_clear     = 2.7f;
-	cfg.spd_blocked   = 0.8f;
-	cfg.coe_clear     = 0.3f;
-	cfg.coe_blocked   = 0.7f;
+	/* Cruise targets (m/s): safe bench/track defaults, not race pace */
+	cfg.spd_clear     = 0.48f;
+	cfg.spd_blocked   = 0.32f;
+	cfg.spd_slew      = 0.85f;
+	cfg.kick_pct      = 18.0f;
+	cfg.kick_ms       = 300;
+	cfg.coe_clear     = 0.28f;
+	cfg.coe_blocked   = 0.65f;
 	cfg.wrong_dir_deg = 120.0f;
 	cfg.race_cw       = true;
 	cfg.stuck_thresh  = 25;
@@ -99,7 +109,7 @@ static void set_defaults(void)
 	cfg.servo_reverse = false;
 	cfg.calibrated    = false;
 	cfg.bat_enabled    = false;
-	cfg.bat_multiplier = 2.8f;
+	cfg.bat_multiplier = 4.85f;
 	cfg.bat_low        = 6.0f;
 }
 
@@ -138,6 +148,9 @@ static void populate_nvs(struct nvs_settings *s)
 	s->loop_ms       = (int8_t)cfg.loop_ms;
 	s->spd_clear     = cfg.spd_clear;
 	s->spd_blocked   = cfg.spd_blocked;
+	s->spd_slew      = cfg.spd_slew;
+	s->kick_pct      = cfg.kick_pct;
+	s->kick_ms       = (int16_t)cfg.kick_ms;
 	s->coe_clear     = cfg.coe_clear;
 	s->coe_blocked   = cfg.coe_blocked;
 	s->wrong_dir_deg = cfg.wrong_dir_deg;
@@ -173,6 +186,21 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.loop_ms       = s->loop_ms;
 	cfg.spd_clear     = s->spd_clear;
 	cfg.spd_blocked   = s->spd_blocked;
+	cfg.spd_slew      = s->spd_slew;
+	cfg.kick_pct      = s->kick_pct;
+	cfg.kick_ms       = s->kick_ms;
+	if (cfg.kick_ms < 0) {
+		cfg.kick_ms = 0;
+	}
+	if (cfg.kick_ms > 5000) {
+		cfg.kick_ms = 5000;
+	}
+	if (cfg.kick_pct < 0.f) {
+		cfg.kick_pct = 0.f;
+	}
+	if (cfg.kick_pct > 80.f) {
+		cfg.kick_pct = 80.f;
+	}
 	cfg.coe_clear     = s->coe_clear;
 	cfg.coe_blocked   = s->coe_blocked;
 	cfg.wrong_dir_deg = s->wrong_dir_deg;

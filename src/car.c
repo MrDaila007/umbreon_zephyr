@@ -14,6 +14,9 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 LOG_MODULE_REGISTER(car, LOG_LEVEL_INF);
 
@@ -23,11 +26,15 @@ static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
 
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;
+static float pid_ref_applied; /* setpoint after spd_slew limiting */
 static float pid_integral;
-static float pid_prev_error;
+static float pid_prev_filtered;  /* for derivative-on-measurement */
 static float pid_filtered;
 static uint32_t pid_prev_cnt;
 static int64_t pid_prev_ms;
+/* Start boost: edge on forward command from rest */
+static int64_t kick_until_ms;
+static float kick_prev_pid_ref;
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -132,11 +139,14 @@ void car_write_speed_ms(float target)
 void car_pid_reset(void)
 {
 	pid_integral = 0;
-	pid_prev_error = 0;
+	pid_prev_filtered = 0;
 	pid_filtered = 0;
 	pid_prev_cnt = 0;
 	pid_prev_ms = 0;
 	target_speed = 0;
+	pid_ref_applied = 0;
+	kick_until_ms = 0;
+	kick_prev_pid_ref = 0;
 }
 
 void car_pid_control(void)
@@ -161,7 +171,7 @@ void car_pid_control(void)
 	float raw_speed = 0.0f;
 	if (cfg.encoder_holes > 0) {
 		raw_speed = (delta_cnt / (float)cfg.encoder_holes) *
-			    (3.14159265f * cfg.wheel_diam_m) / dt;
+			    ((float)M_PI * cfg.wheel_diam_m) / dt;
 	}
 
 	/* EMA filter (0.7 = responsive, 0.3 = smooth) */
@@ -170,18 +180,59 @@ void car_pid_control(void)
 		pid_filtered = 0;
 	}
 
-	/* PID */
-	float error = target_speed - pid_filtered;
+	/* Slew-limit setpoint (m/s²) — smooth start / mode transitions */
+	if (cfg.spd_slew > 0.001f) {
+		float step = cfg.spd_slew * dt;
+		if (target_speed > pid_ref_applied + step) {
+			pid_ref_applied += step;
+		} else if (target_speed < pid_ref_applied - step) {
+			pid_ref_applied -= step;
+		} else {
+			pid_ref_applied = target_speed;
+		}
+	} else {
+		pid_ref_applied = target_speed;
+	}
+
+	/* Kick-off pulse: % of (max−min) ESC span for kick_ms after forward edge from rest */
+	bool want_fwd = pid_ref_applied > 0.02f;
+	bool had_fwd = kick_prev_pid_ref > 0.02f;
+	if (!want_fwd) {
+		kick_until_ms = 0;
+	} else if (!had_fwd && pid_filtered < 0.10f && cfg.kick_pct > 0.05f &&
+		   cfg.kick_ms > 0) {
+		kick_until_ms = now_ms + cfg.kick_ms;
+	}
+	if (want_fwd && pid_ref_applied > 0.05f &&
+	    pid_filtered >= pid_ref_applied * 0.78f) {
+		kick_until_ms = 0;
+	}
+	kick_prev_pid_ref = pid_ref_applied;
+
+	/* PID — derivative on measurement (no kick on target change) */
+	float error = pid_ref_applied - pid_filtered;
 	pid_integral += error * dt;
 	pid_integral = CLAMP(pid_integral, -50.0f, 50.0f);
-	float deriv = (error - pid_prev_error) / dt;
-	pid_prev_error = error;
+	float deriv = -(pid_filtered - pid_prev_filtered) / dt;
+	pid_prev_filtered = pid_filtered;
 
-	/* Feedforward: jump past motor dead zone */
-	float ff = (target_speed > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;
+	/* Feedforward: jump past motor dead zone (follows slewed setpoint) */
+	float ff = (pid_ref_applied > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;
 	float output = ff + cfg.pid_kp * error + cfg.pid_ki * pid_integral + cfg.pid_kd * deriv;
 
-	int esc_val = NEUTRAL_SPEED + (int)output;
+	float kick_us = 0.0f;
+	if (cfg.kick_pct > 0.05f && want_fwd && now_ms < kick_until_ms) {
+		int span = cfg.max_speed - cfg.min_speed;
+		if (span < 1) {
+			span = 1;
+		}
+		kick_us = (cfg.kick_pct / 100.0f) * (float)span;
+		if (kick_us > 40.0f) {
+			kick_us = 40.0f;
+		}
+	}
+
+	int esc_val = NEUTRAL_SPEED + (int)(output + kick_us);
 	esc_val = CLAMP(esc_val, NEUTRAL_SPEED, cfg.max_speed);
 	esc_set_us(esc_val);
 }

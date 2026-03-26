@@ -15,9 +15,11 @@
 #include "wifi_cmd.h"
 #include "battery.h"
 #include "track_learn.h"
+#include "display.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
 
@@ -33,6 +35,7 @@ static struct k_thread control_thread_data;
 static volatile bool car_running;
 static volatile bool manual_mode;
 static volatile bool drv_enabled;
+static volatile bool monitor_mode;
 static volatile int manual_steer;
 static volatile float manual_speed;
 static volatile int64_t last_drv_ms;
@@ -40,6 +43,10 @@ static volatile int64_t last_drv_ms;
 /* Stuck detection (persistent across work() calls) */
 static int stuck_time;
 static float turns;
+
+/* ─── Heartbeat LED ──────────────────────────────────────────────────────── */
+static const struct gpio_dt_spec heartbeat_led =
+	GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
 /* ─── Wall follow bias ────────────────────────────────────────────────────── */
 #define WALL_FOLLOW_BIAS 800
@@ -226,6 +233,45 @@ static void work(void)
 	}
 }
 
+/* ─── work_monitor() — diagnostic mode: sensors + servo, no motor ─────────── */
+
+static void work_monitor(void)
+{
+	int *s = sensors_poll();
+	imu_update();
+
+	/* ── Steering (same wall-follow logic as work()) ──────────────── */
+	int diff;
+
+	if (s[IDX_LEFT] > cfg.side_open_dist && s[IDX_RIGHT] > cfg.side_open_dist) {
+		diff = WALL_FOLLOW_BIAS;
+	} else {
+		diff = s[IDX_RIGHT] - s[IDX_LEFT];
+	}
+
+	bool all_close = true;
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		if (s[i] >= cfg.all_close_dist) {
+			all_close = false;
+			break;
+		}
+	}
+	if (all_close) {
+		diff = WALL_FOLLOW_BIAS;
+	}
+
+	/* Hard-side blend */
+	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
+
+	/* Use clear coefficients for steering */
+	int steer_val = (int)(diff * cfg.coe_clear);
+	car_write_steer(steer_val);
+
+	/* No motor — no speed, no PID, no stuck/wrong-dir detection */
+
+	send_telemetry(s, steer_val, 0.0f);
+}
+
 /* ─── Control thread ──────────────────────────────────────────────────────── */
 
 static void control_thread(void *p1, void *p2, void *p3)
@@ -240,6 +286,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 	while (1) {
 		wdt_feed_kick();
+		gpio_pin_toggle_dt(&heartbeat_led);
 
 		int64_t now = k_uptime_get();
 		if (now < next_loop) {
@@ -254,7 +301,10 @@ static void control_thread(void *p1, void *p2, void *p3)
 		bool drv_active = drv_enabled && manual_mode &&
 				  (k_uptime_get() - last_drv_ms < 500);
 
-		if (car_running && !drv_active) {
+		if (monitor_mode && !car_running) {
+			/* Diagnostic monitor mode */
+			work_monitor();
+		} else if (car_running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;
 			work();
@@ -280,6 +330,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 			} else if (now - bat_low_since > 10000) {
 				if (car_running || drv_enabled) {
 					car_running = false;
+					display_notify_run_state(false);
 					drv_enabled = false;
 					manual_mode = false;
 					car_write_speed(0);
@@ -298,6 +349,10 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 void control_init(void)
 {
+	if (gpio_is_ready_dt(&heartbeat_led)) {
+		gpio_pin_configure_dt(&heartbeat_led, GPIO_OUTPUT_INACTIVE);
+	}
+
 	k_thread_create(&control_thread_data, control_stack,
 			K_THREAD_STACK_SIZEOF(control_stack),
 			control_thread, NULL, NULL, NULL,
@@ -323,17 +378,34 @@ void control_cmd_start(void)
 	/* 5-second countdown — idle telemetry flows */
 	int64_t start_at = k_uptime_get() + 5000;
 	while (k_uptime_get() < start_at) {
+		wdt_feed_kick();
 		send_idle_telemetry();
 		k_msleep(cfg.loop_ms);
 	}
 
 	car_running = true;
+	display_notify_run_state(true);
 	wifi_cmd_send("$STS:RUN\n");
+}
+
+void control_cmd_monitor(void)
+{
+	imu_reset_heading();
+	monitor_mode = true;
+	wifi_cmd_send("$ACK\n");
+	wifi_cmd_send("$STS:MONITOR\n");
+}
+
+bool control_is_monitor(void)
+{
+	return monitor_mode;
 }
 
 void control_cmd_stop(void)
 {
 	car_running = false;
+	monitor_mode = false;
+	display_notify_run_state(false);
 	drv_enabled = false;
 	manual_mode = false;
 	manual_steer = 0;

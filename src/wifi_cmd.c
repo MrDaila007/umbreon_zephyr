@@ -22,6 +22,7 @@
 #include "control.h"
 #include "tests.h"
 #include "track_learn.h"
+#include "display.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -51,7 +52,11 @@ static K_SEM_DEFINE(rx_line_sem, 0, 1);
 static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_len;
 
-/* ─── TX output buffer ────────────────────────────────────────────────────── */
+/* ─── Async TX ring buffer ───────────────────────────────────────────────── */
+#define TX_BUF_SIZE 1024
+static uint8_t tx_buf[TX_BUF_SIZE];
+static volatile uint16_t tx_head;  /* written by threads (under mutex) */
+static volatile uint16_t tx_tail;  /* read by ISR */
 static K_MUTEX_DEFINE(tx_mutex);
 
 /* ─── Debug log flag ──────────────────────────────────────────────────────── */
@@ -63,17 +68,36 @@ static volatile bool log_on;
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
-/* ─── UART TX helpers ─────────────────────────────────────────────────────── */
+/* ─── Async TX helpers ────────────────────────────────────────────────────── */
+
+static inline uint16_t tx_free(void)
+{
+	uint16_t h = tx_head;
+	uint16_t t = tx_tail;
+	/* One slot reserved to distinguish full from empty */
+	return (t > h) ? (t - h - 1) : (TX_BUF_SIZE - h + t - 1);
+}
 
 void wifi_cmd_send(const char *str)
 {
 	if (!uart_dev) {
 		return;
 	}
+
 	k_mutex_lock(&tx_mutex, K_FOREVER);
+
 	for (const char *p = str; *p; p++) {
-		uart_poll_out(uart_dev, *p);
+		uint16_t next = (tx_head + 1) % TX_BUF_SIZE;
+		if (next == tx_tail) {
+			break;  /* ring buffer full — drop rest */
+		}
+		tx_buf[tx_head] = (uint8_t)*p;
+		tx_head = next;
 	}
+
+	/* Kick TX IRQ — ISR will drain the buffer */
+	uart_irq_tx_enable(uart_dev);
+
 	k_mutex_unlock(&tx_mutex);
 }
 
@@ -138,6 +162,7 @@ static void uart_isr(const struct device *dev, void *user_data)
 		return;
 	}
 
+	/* ── RX ────────────────────────────────────────────────────────────── */
 	while (uart_irq_rx_ready(dev)) {
 		uint8_t c;
 		int len = uart_fifo_read(dev, &c, 1);
@@ -153,6 +178,28 @@ static void uart_isr(const struct device *dev, void *user_data)
 
 		if (c == '\n') {
 			k_sem_give(&rx_line_sem);
+		}
+	}
+
+	/* ── TX — drain ring buffer via FIFO ──────────────────────────────── */
+	if (uart_irq_tx_ready(dev)) {
+		uint16_t t = tx_tail;
+		if (t == tx_head) {
+			/* Nothing left to send */
+			uart_irq_tx_disable(dev);
+		} else {
+			/* Build a contiguous chunk to send */
+			uint16_t h = tx_head;
+			uint16_t len;
+			if (h > t) {
+				len = h - t;
+			} else {
+				len = TX_BUF_SIZE - t;  /* up to wrap */
+			}
+			int sent = uart_fifo_fill(dev, &tx_buf[t], len);
+			if (sent > 0) {
+				tx_tail = (t + sent) % TX_BUF_SIZE;
+			}
 		}
 	}
 }
@@ -175,29 +222,32 @@ static bool parse_set_pair(const char *pair)
 	key[klen] = '\0';
 	const char *val = eq + 1;
 
-	if      (strcmp(key, "FOD")  == 0) cfg.front_obstacle_dist = atoi(val);
-	else if (strcmp(key, "SOD")  == 0) cfg.side_open_dist      = atoi(val);
-	else if (strcmp(key, "ACD")  == 0) cfg.all_close_dist      = atoi(val);
-	else if (strcmp(key, "CFD")  == 0) cfg.close_front_dist    = atoi(val);
+	if      (strcmp(key, "FOD")  == 0) cfg.front_obstacle_dist = CLAMP(atoi(val), 10, MAX_SENSOR_RANGE);
+	else if (strcmp(key, "SOD")  == 0) cfg.side_open_dist      = CLAMP(atoi(val), 10, MAX_SENSOR_RANGE);
+	else if (strcmp(key, "ACD")  == 0) cfg.all_close_dist      = CLAMP(atoi(val), 10, MAX_SENSOR_RANGE);
+	else if (strcmp(key, "CFD")  == 0) cfg.close_front_dist    = CLAMP(atoi(val), 10, MAX_SENSOR_RANGE);
 	else if (strcmp(key, "KP")   == 0) cfg.pid_kp              = strtof(val, NULL);
 	else if (strcmp(key, "KI")   == 0) cfg.pid_ki              = strtof(val, NULL);
 	else if (strcmp(key, "KD")   == 0) cfg.pid_kd              = strtof(val, NULL);
-	else if (strcmp(key, "MSP")  == 0) cfg.min_speed           = atoi(val);
-	else if (strcmp(key, "XSP")  == 0) cfg.max_speed           = atoi(val);
-	else if (strcmp(key, "BSP")  == 0) cfg.min_bspeed          = atoi(val);
-	else if (strcmp(key, "MNP")  == 0) cfg.min_point           = atoi(val);
-	else if (strcmp(key, "XNP")  == 0) cfg.max_point           = atoi(val);
-	else if (strcmp(key, "NTP")  == 0) cfg.neutral_point       = atoi(val);
-	else if (strcmp(key, "ENH")  == 0) cfg.encoder_holes       = atoi(val);
+	else if (strcmp(key, "MSP")  == 0) cfg.min_speed           = CLAMP(atoi(val), 1000, 2000);
+	else if (strcmp(key, "XSP")  == 0) cfg.max_speed           = CLAMP(atoi(val), 1000, 2000);
+	else if (strcmp(key, "BSP")  == 0) cfg.min_bspeed          = CLAMP(atoi(val), 1000, 2000);
+	else if (strcmp(key, "MNP")  == 0) cfg.min_point           = CLAMP(atoi(val), 0, 180);
+	else if (strcmp(key, "XNP")  == 0) cfg.max_point           = CLAMP(atoi(val), 0, 180);
+	else if (strcmp(key, "NTP")  == 0) cfg.neutral_point       = CLAMP(atoi(val), 0, 180);
+	else if (strcmp(key, "ENH")  == 0) cfg.encoder_holes       = MAX(atoi(val), 1);
 	else if (strcmp(key, "WDM")  == 0) cfg.wheel_diam_m        = strtof(val, NULL);
-	else if (strcmp(key, "LMS")  == 0) cfg.loop_ms             = atoi(val);
+	else if (strcmp(key, "LMS")  == 0) cfg.loop_ms             = MAX(atoi(val), 10);
 	else if (strcmp(key, "SPD1") == 0) cfg.spd_clear           = strtof(val, NULL);
 	else if (strcmp(key, "SPD2") == 0) cfg.spd_blocked         = strtof(val, NULL);
+	else if (strcmp(key, "SLW")  == 0) cfg.spd_slew           = strtof(val, NULL);
+	else if (strcmp(key, "KOP")  == 0) cfg.kick_pct           = strtof(val, NULL);
+	else if (strcmp(key, "KOM")  == 0) cfg.kick_ms            = MAX(atoi(val), 0);
 	else if (strcmp(key, "COE1") == 0) cfg.coe_clear           = strtof(val, NULL);
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
-	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = atoi(val);
+	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -219,7 +269,7 @@ static void cmd_get(void)
 		",MSP=%d,XSP=%d,BSP=%d"
 		",MNP=%d,XNP=%d,NTP=%d"
 		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,COE1=%.2f,COE2=%.2f"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d,COE1=%.2f,COE2=%.2f"
 		",WDD=%.1f,RCW=%d,STK=%d"
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
@@ -231,6 +281,8 @@ static void cmd_get(void)
 		cfg.min_point, cfg.max_point, cfg.neutral_point,
 		cfg.encoder_holes, (double)cfg.wheel_diam_m, cfg.loop_ms,
 		(double)cfg.spd_clear, (double)cfg.spd_blocked,
+		(double)cfg.spd_slew,
+		(double)cfg.kick_pct, cfg.kick_ms,
 		(double)cfg.coe_clear, (double)cfg.coe_blocked,
 		(double)cfg.wrong_dir_deg, cfg.race_cw ? 1 : 0, cfg.stuck_thresh,
 		cfg.imu_rotate ? 1 : 0, cfg.servo_reverse ? 1 : 0,
@@ -338,7 +390,7 @@ static void cmd_help(void)
 	wifi_cmd_send(
 		"$HELP:Commands:\n"
 		"$L: $PING $GET $SET:<k>=<v>,... $SAVE $LOAD $RST\n"
-		"$L: $START $STOP $STATUS $BAT\n"
+		"$L: $START $STOP $MONITOR $STATUS $BAT\n"
 		"$L: $DRV:<steer>,<speed> $DRVEN $DRVOFF\n"
 		"$L: $SRV:<angle> $ESC:<us>\n"
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
@@ -375,8 +427,12 @@ static void dispatch_command(const char *line)
 		control_cmd_start();
 	} else if (strcmp(line, "$STOP") == 0) {
 		control_cmd_stop();
+	} else if (strcmp(line, "$MONITOR") == 0) {
+		control_cmd_monitor();
 	} else if (strcmp(line, "$STATUS") == 0) {
-		wifi_cmd_printf("$STS:%s\n", control_is_running() ? "RUN" : "STOP");
+		wifi_cmd_printf("$STS:%s\n",
+			control_is_running() ? "RUN" :
+			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
 	} else if (strncmp(line, "$TEST:", 6) == 0) {
@@ -437,24 +493,57 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 	/* Query ESP status */
 	wifi_cmd_send("#WIFISTATUS\n");
 
-	while (1) {
-		/* Block until a full line is available */
-		k_sem_take(&rx_line_sem, K_FOREVER);
+	/* Poll on both UART semaphore and OLED menu command queue */
+	struct k_poll_event poll_events[2] = {
+		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+					 K_POLL_MODE_NOTIFY_ONLY, &rx_line_sem),
+		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					 K_POLL_MODE_NOTIFY_ONLY, &menu_cmd_q),
+	};
 
-		/* Drain ring buffer into cmd_buf */
-		uint8_t c;
-		while (rb_get(&c)) {
-			if (c == '\n' || c == '\r') {
-				if (cmd_len > 0) {
-					cmd_buf[cmd_len] = '\0';
-					if (cmd_buf[0] == '$') {
-						dispatch_command(cmd_buf);
+	while (1) {
+		k_poll(poll_events, 2, K_FOREVER);
+
+		/* Reset poll event states */
+		poll_events[0].state = K_POLL_STATE_NOT_READY;
+		poll_events[1].state = K_POLL_STATE_NOT_READY;
+
+		/* Handle UART line if available */
+		if (k_sem_take(&rx_line_sem, K_NO_WAIT) == 0) {
+			uint8_t c;
+			while (rb_get(&c)) {
+				if (c == '\n' || c == '\r') {
+					if (cmd_len > 0) {
+						cmd_buf[cmd_len] = '\0';
+						if (cmd_buf[0] == '$') {
+							dispatch_command(cmd_buf);
+						}
+						cmd_len = 0;
 					}
-					/* # ESP status lines — just log, no parsing needed */
-					cmd_len = 0;
+				} else if (cmd_len < CMD_BUF_SIZE - 1) {
+					cmd_buf[cmd_len++] = (char)c;
 				}
-			} else if (cmd_len < CMD_BUF_SIZE - 1) {
-				cmd_buf[cmd_len++] = (char)c;
+			}
+		}
+
+		/* Handle OLED menu commands */
+		uint8_t mcmd;
+		while (k_msgq_get(&menu_cmd_q, &mcmd, K_NO_WAIT) == 0) {
+			switch (mcmd) {
+			case MCMD_START: control_cmd_start(); break;
+			case MCMD_STOP:  control_cmd_stop();  break;
+			case MCMD_SAVE:  settings_save(); wifi_cmd_send("$ACK\n"); break;
+			case MCMD_LOAD:  settings_load(); wifi_cmd_send("$ACK\n"); break;
+			case MCMD_RESET: settings_reset(); wifi_cmd_send("$ACK\n"); break;
+			default:
+				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
+					static const char *test_names[] = {
+						"lidar", "servo", "taho", "esc",
+						"speed", "autotune", "reactive", "cal",
+					};
+					tests_run_by_name(test_names[mcmd - MCMD_TEST_BASE]);
+				}
+				break;
 			}
 		}
 	}

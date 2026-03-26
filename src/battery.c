@@ -35,7 +35,7 @@ static const struct adc_channel_cfg adc_ch_cfg = {
 #define BAT_EMA 0.05f
 
 /* ─── State ───────────────────────────────────────────────────────────────── */
-static float bat_voltage;
+static volatile float bat_voltage;
 
 /* ─── Thread config ───────────────────────────────────────────────────────── */
 #define BAT_STACK_SIZE 1024
