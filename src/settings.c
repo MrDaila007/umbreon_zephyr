@@ -91,7 +91,7 @@ static void set_defaults(void)
 	cfg.min_point     = 60;
 	cfg.max_point     = 120;
 	cfg.neutral_point = 90;
-	cfg.encoder_holes = 62;
+	cfg.encoder_holes = 68;
 	cfg.wheel_diam_m  = 0.060f;
 	cfg.loop_ms       = 40;
 	/* Cruise targets (m/s): safe bench/track defaults, not race pace */
@@ -109,7 +109,7 @@ static void set_defaults(void)
 	cfg.servo_reverse = false;
 	cfg.calibrated    = false;
 	cfg.bat_enabled    = false;
-	cfg.bat_multiplier = 2.8f;
+	cfg.bat_multiplier = 4.85f;
 	cfg.bat_low        = 6.0f;
 }
 
