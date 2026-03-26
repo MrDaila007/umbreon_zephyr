@@ -10,8 +10,9 @@ Proxmox VE (хост)
   └── LXC контейнер (Ubuntu 24.04)
         ├── GitHub Actions Runner (systemd)
         ├── Zephyr SDK 0.17 + workspace v4.3
+        ├── ESP8266 RTOS SDK + Xtensa (umbreon_esp_web)
         ├── OpenOCD
-        └── USB ──► ST-Link ──► SWD ──► Pico 2
+        └── USB ──► ST-Link ──► SWD ──► Pico 2   (опционально, HIL)
 ```
 
 ## Что даёт
@@ -115,8 +116,11 @@ apt install -y \
     git cmake ninja-build python3 python3-pip python3-venv \
     wget curl ccache device-tree-compiler dfu-util \
     build-essential pkg-config libusb-1.0-0-dev \
+    gcc-multilib g++-multilib \
     picocom usbutils
 ```
+
+`gcc-multilib` / `g++-multilib` нужны для **native_sim** (ztest в CI собирается с `-m32`); без них ошибка `bits/libc-header-start.h: No such file or directory`.
 
 ### 2.2 OpenOCD (для HIL)
 
@@ -228,12 +232,54 @@ pip install west
 pip install -r zephyr/scripts/requirements.txt
 ```
 
+### 3.6 ESP8266 RTOS SDK (umbreon_esp_web)
+
+Нужен для CI репозитория **umbreon_esp_web** (рядом с `umbreon_zephyr` в рабочей копии или отдельный клон на GitHub). Сборка идёт через `Makefile`: `~/ESP8266_RTOS_SDK`, toolchain в `~/.espressif/tools/...` (см. строку `TOOLCHAIN` в `Makefile` проекта).
+
+От имени **`runner`**:
+
+```bash
+su - runner
+
+# Без --depth 1: install.sh вызывает `git describe --tags`; у shallow-клона тегов нет → ошибка 128
+git clone --recursive https://github.com/espressif/ESP8266_RTOS_SDK.git ~/ESP8266_RTOS_SDK
+cd ~/ESP8266_RTOS_SDK
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install virtualenv
+# install.sh + idf_tools: если нет модуля virtualenv, скрипт делает pip install --user virtualenv — внутри venv --user запрещён → ошибка
+./install.sh
+deactivate
+```
+
+Если **`/usr/bin/env: 'python': No such file or directory`**: **`sudo apt install -y python-is-python3`**.
+
+Альтернатива без `pip install virtualenv` в venv: перед `./install.sh` выполнить **`deactivate`**, в системе **`sudo apt install -y python3-virtualenv`**, затем снова **`./install.sh`** (системный `python3` подхватит пакет `virtualenv`).
+
+`install.sh` ставит Xtensa toolchain в `~/.espressif/tools/xtensa-lx106-elf/`. Проверьте, что **имя каталога версии** совпадает с переменной `TOOLCHAIN` в `Makefile` в корне **umbreon_esp_web** (строка с `esp-2020r3-...`). Если `install.sh` положил другую версию — обновите строку `TOOLCHAIN` в `Makefile` или зафиксируйте версию SDK/toolchain как в документации Espressif.
+
+Проверка:
+
+```bash
+source ~/ESP8266_RTOS_SDK/export.sh
+# клон umbreon_esp_web и:
+cd ~/path/to/umbreon_esp_web && make all
+```
+
+#### Один раннер на Zephyr и ESP8266
+
+- **Runner уровня организации** — один и тот же runner обслуживает все репозитории org (удобнее всего).
+- **Runner привязан к одному репо** — для второго репозитория: **Settings → Actions → Runners → New self-hosted runner** и на **той же машине** второй каталог, например `~/actions-runner-esp-web`, второй `./config.sh` с URL второго репо и теми же labels `self-hosted,linux,embedded`; затем `./svc.sh install runner` (будет второй systemd unit). Либо перенесите оба репозитория в org и используйте один org runner.
+
 ---
 
 ## Часть 4: Workflow для self-hosted runner
 
-- **Активный CI:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из предустановленного `~/zephyrproject` (см. §3.5).
-- **Резервная копия облачного варианта** (GitHub-hosted + Docker Zephyr CI): [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml). Чтобы снова гонять CI в облаке, можно подменить содержимое `build.yml` этим файлом.
+- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject` (§3.5).
+- **umbreon_esp_web:** [`umbreon_esp_web/.github/workflows/build.yml`](../../umbreon_esp_web/.github/workflows/build.yml) — тот же `runs-on`, `~/ESP8266_RTOS_SDK` (§3.6).
+- **Резервная копия облачного Zephyr CI:** [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml).
 
 У раннера в `config.sh` / настройках GitHub должны быть те же labels: `self-hosted`, `linux`, `embedded`.
 
@@ -343,11 +389,11 @@ pip install -r zephyr/scripts/requirements.txt
 
 - [ ] Контейнер запущен: `pct status 200`
 - [ ] Runner online: GitHub → Settings → Actions → Runners (зелёный кружок)
-- [ ] ST-Link виден: `lsusb | grep 0483` внутри контейнера
-- [ ] OpenOCD работает: `openocd -f interface/stlink.cfg -f target/rp2350.cfg -c "init; exit"`
-- [ ] Zephyr собирается: `make build` в директории проекта
-- [ ] `west flash` работает с ST-Link
-- [ ] UART доступен: `picocom /dev/ttyUSB0 -b 115200`
+- [ ] Zephyr: `~/zephyrproject/.venv`, `west --version`, сборка `umbreon_zephyr` проходит в Actions
+- [ ] ESP8266: `~/ESP8266_RTOS_SDK`, после `export.sh` — `make all` в клоне `umbreon_esp_web`
+- [ ] (Опционально HIL) ST-Link: `lsusb | grep 0483` внутри контейнера
+- [ ] (Опционально HIL) OpenOCD: `openocd -f interface/stlink.cfg -f target/rp2350.cfg -c "init; exit"`
+- [ ] (Опционально HIL) `west flash`, UART `picocom /dev/ttyUSB0 -b 115200`
 
 ### Тестовый запуск
 

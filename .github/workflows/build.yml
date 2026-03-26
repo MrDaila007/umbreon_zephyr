@@ -41,7 +41,7 @@ jobs:
           name: firmware
           path: ${{ env.ZEPHYR_UF2 }}
 
-  # ── Zephyr ztest (native_sim) ─────────────────────────────────────────────
+  # ── Zephyr ztest (native_sim, gcc -m32) — на runner нужны gcc-multilib g++-multilib
   test-ztest:
     needs: build
     runs-on: [self-hosted, linux, embedded]
