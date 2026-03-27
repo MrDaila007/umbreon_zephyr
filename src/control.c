@@ -82,7 +82,9 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 }
 
 /* ─── go_back() ───────────────────────────────────────────────────────────── */
-/* Port from Umbreon_roborace.ino:1060-1084 */
+/* Port from Umbreon_roborace.ino:1060-1084
+ * Fixed: ESC double-tap sequence (brake→neutral→reverse) so the ESC
+ * actually engages reverse gear instead of just braking. */
 
 extern void wdt_feed_kick(void);
 
@@ -90,6 +92,10 @@ extern void wdt_feed_kick(void);
 #define REVERSE_MIN_DIST  0.13f
 /* Maximum reverse duration (ms) */
 #define REVERSE_TIMEOUT   1500
+/* Minimum time in reverse before allowing early exit (ms) */
+#define REVERSE_MIN_TIME  400
+/* Reverse ESC command (raw -1000…+1000 scale) */
+#define REVERSE_SPEED     (-250)
 
 static void go_back(void)
 {
@@ -104,7 +110,6 @@ static void go_back(void)
 	} else if (right_space > left_space + 50) {
 		escape_steer = 600;
 	} else {
-		/* Sides equal — turn toward inside of race direction */
 		escape_steer = cfg.race_cw ? -600 : 600;
 	}
 
@@ -118,33 +123,44 @@ static void go_back(void)
 		k_msleep(10);
 	}
 
-	/* 3. Reverse with sensor-guided steering */
+	/* 3. ESC double-tap: most RC ESCs need brake→neutral→reverse to
+	 *    engage reverse gear.  Without this the first reverse signal
+	 *    only brakes and the car stays in place. */
 	car_write_steer(escape_steer);
+	car_write_speed(REVERSE_SPEED);
+	k_msleep(120);
+	wdt_feed_kick();
+	car_write_speed(0);
+	k_msleep(80);
+
+	/* 4. Actual reverse — take encoder snapshot after double-tap so
+	 *    the braking phase doesn't count as travel distance. */
 	uint32_t start_count = taho_get_count();
 	int alt = 0;
 
-	car_write_speed(-150);
-	deadline = k_uptime_get() + REVERSE_TIMEOUT;
+	car_write_speed(REVERSE_SPEED);
+	int64_t reverse_start = k_uptime_get();
+	deadline = reverse_start + REVERSE_TIMEOUT;
 
 	while (k_uptime_get() < deadline) {
 		wdt_feed_kick();
 
-		/* Poll sides + one front (alternate FL/FR each cycle) */
 		s = sensors_poll_mask(alt ? MASK_FRONT_R : MASK_FRONT_L);
 		alt = !alt;
 
-		/* Distance traveled (encoder counts → meters) */
-		uint32_t delta = taho_get_count() - start_count;
-		float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
-			     / (float)cfg.encoder_holes;
+		/* Skip early-exit check until minimum reverse time elapsed */
+		if ((k_uptime_get() - reverse_start) >= REVERSE_MIN_TIME) {
+			uint32_t delta = taho_get_count() - start_count;
+			float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
+				     / (float)cfg.encoder_holes;
 
-		/* Front clear? (both FL and FR above threshold) */
-		bool front_clear =
-			s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
-			s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
+			bool front_clear =
+				s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
+				s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
 
-		if (front_clear && dist >= REVERSE_MIN_DIST) {
-			break;
+			if (front_clear && dist >= REVERSE_MIN_DIST) {
+				break;
+			}
 		}
 
 		/* Update escape direction from sides */
@@ -162,7 +178,6 @@ static void go_back(void)
 	}
 
 	car_write_speed(0);
-	/* Keep escape steering for the forward drive that follows */
 	car_write_steer(escape_steer);
 	send_run_state(RUN_REVERSE, 0, turns, 0, escape_steer);
 }
@@ -176,12 +191,12 @@ static void go_back_long(void)
 		wdt_feed_kick();
 		k_msleep(10);
 	}
-	car_write_speed(-150);
+	car_write_speed(REVERSE_SPEED);
 	k_msleep(1000);
 	wdt_feed_kick();
 	car_write_speed(0);
 	k_msleep(80);
-	car_write_speed(-150);
+	car_write_speed(REVERSE_SPEED);
 	k_msleep(1800);
 	wdt_feed_kick();
 	car_write_speed(0);
