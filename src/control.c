@@ -63,24 +63,8 @@ static int run_telem_div;
 #define MASK_FRONT_L (MASK_SIDES | BIT(IDX_FRONT_LEFT))
 #define MASK_FRONT_R (MASK_SIDES | BIT(IDX_FRONT_RIGHT))
 
-/* ─── Sensor rotation ────────────────────────────────────────────────────── */
-/* Always poll LEFT + RIGHT (critical for wall-following).
- * Rotate one extra sensor per cycle: FL → FR → HL → HR.
- * 3 sensors/cycle ≈ 100ms vs 6/cycle ≈ 200ms → ~2× faster loop. */
-static int sensor_phase;
-static const uint8_t sensor_extra[] = {
-	BIT(IDX_FRONT_LEFT),
-	BIT(IDX_FRONT_RIGHT),
-	BIT(IDX_HARD_LEFT),
-	BIT(IDX_HARD_RIGHT),
-};
-
-static int *sensors_poll_rotate(void)
-{
-	uint8_t mask = MASK_SIDES | sensor_extra[sensor_phase & 3];
-	sensor_phase++;
-	return sensors_poll_mask(mask);
-}
+/* Sensor rotation removed: continuous back-to-back mode allows
+ * non-blocking reads (~1 ms/sensor), so we poll all 6 every cycle. */
 
 /* ─── Heartbeat LED ──────────────────────────────────────────────────────── */
 static const struct gpio_dt_spec heartbeat_led =
@@ -232,7 +216,7 @@ static void send_idle_telemetry(void)
 
 static void work(void)
 {
-	int *s = sensors_poll_rotate();
+	int *s = sensors_poll();
 	imu_update();
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
@@ -349,7 +333,7 @@ static void work(void)
 
 		int64_t strt = k_uptime_get();
 		while ((k_uptime_get() - strt) < 900) {
-			sensors_poll_rotate();
+			sensors_poll();
 			imu_update();
 			car_pid_control();
 			k_msleep(10);
@@ -363,7 +347,7 @@ static void work(void)
 
 static void work_monitor(void)
 {
-	int *s = sensors_poll_rotate();
+	int *s = sensors_poll();
 	imu_update();
 
 	/* ── Steering (same wall-follow logic as work()) ──────────────── */
@@ -501,7 +485,6 @@ void control_cmd_start(void)
 	turns = 0.0f;
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
-	sensor_phase = 0;
 	wifi_cmd_send("$ACK\n");
 
 	/* 5-second countdown — idle telemetry flows */
@@ -520,7 +503,6 @@ void control_cmd_start(void)
 void control_cmd_monitor(void)
 {
 	imu_reset_heading();
-	sensor_phase = 0;
 	monitor_mode = true;
 	wifi_cmd_send("$ACK\n");
 	wifi_cmd_send("$STS:MONITOR\n");
