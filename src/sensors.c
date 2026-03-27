@@ -1,17 +1,15 @@
 /*
  * sensors.c — 6× VL53L0X ToF sensor array
  *
- * Uses Zephyr's built-in st,vl53l0x driver for init (XSHUT sequencing,
- * I2C address assignment, calibration), then switches to continuous
- * back-to-back mode via vl53l0x_fast for non-blocking reads (~1 ms/sensor
- * instead of ~33 ms/sensor in single-shot mode).
+ * Uses the enhanced VL53L0X driver (out-of-tree module) which supports
+ * continuous back-to-back measurement mode via standard Zephyr sensor API.
+ * Non-blocking reads (~1 ms/sensor instead of ~33 ms in single-shot).
  *
  * Sensor order: [Hard-Right, Front-Right, Right, Left, Front-Left, Hard-Left]
  */
 
 #include "sensors.h"
 #include "settings.h"
-#include "vl53l0x_fast.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -19,23 +17,17 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
+#include <vl53l0x_enhanced.h>
 
 LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 
 #define VL53L0X_MAX_RAW  8190  /* sensor overflow / out-of-range indicator */
 
-/* ─── Device handles (stock Zephyr driver, used for init only) ────────────── */
+/* ─── Device handles ──────────────────────────────────────────────────────── */
 static const struct device *vl53_devs[SENSOR_COUNT];
 static bool vl53_valid[SENSOR_COUNT];
 static int distances[SENSOR_COUNT]; /* cm×10 */
 static int online_count;
-
-/* ─── Fast continuous-mode state ─────────────────────────────────────────── */
-static struct vl53l0x_fast fast[SENSOR_COUNT];
-static bool fast_mode;
-static const uint16_t vl53_addrs[SENSOR_COUNT] = {
-	0x30, 0x31, 0x32, 0x33, 0x34, 0x35
-};
 
 extern void wdt_feed_kick(void);
 
@@ -83,50 +75,51 @@ void sensors_init(void)
 	LOG_INF("VL53L0X: %d/%d online", online_count, SENSOR_COUNT);
 
 	/*
-	 * Phase 2: trigger stock driver's lazy init (calibration)
-	 * then switch each sensor to continuous back-to-back mode.
+	 * Phase 2: trigger lazy init (calibration) via first blocking fetch,
+	 * then configure high-speed profile and continuous mode.
 	 */
-	int fast_count = 0;
+	int cont_count = 0;
 	for (int i = 0; i < SENSOR_COUNT; i++) {
 		if (!vl53_valid[i]) {
 			continue;
 		}
 
-		/* One blocking single-shot fetch triggers vl53l0x_start()
-		 * inside the stock driver: XSHUT release, address reconfig,
+		/* First fetch triggers lazy init: XSHUT release, address reconfig,
 		 * DataInit, StaticInit, calibration (~50 ms per sensor). */
 		int rc = sensor_sample_fetch(vl53_devs[i]);
 		wdt_feed_kick();
 		if (rc != 0) {
-			LOG_WRN("VL53L0X[%d] calibration fetch failed: %d", i, rc);
+			LOG_WRN("VL53L0X[%d] init fetch failed: %d", i, rc);
 			vl53_valid[i] = false;
 			online_count--;
 			continue;
 		}
 
-		/* Read StopVariable and FractionEnable from sensor */
-		rc = vl53l0x_fast_init(&fast[i], i2c1, vl53_addrs[i]);
+		/* Set high-speed profile (20 ms timing budget) */
+		struct sensor_value val = { .val1 = VL53L0X_PROFILE_HIGH_SPEED };
+		rc = sensor_attr_set(vl53_devs[i], SENSOR_CHAN_DISTANCE,
+				     (enum sensor_attribute)SENSOR_ATTR_VL53L0X_PROFILE,
+				     &val);
 		if (rc != 0) {
-			LOG_WRN("VL53L0X[%d] fast init failed: %d", i, rc);
-			continue;  /* sensor stays on stock driver fallback */
+			LOG_WRN("VL53L0X[%d] profile set failed: %d", i, rc);
 		}
 
-		/* Start continuous back-to-back mode */
-		rc = vl53l0x_fast_start(&fast[i]);
+		/* Switch to continuous back-to-back mode */
+		val.val1 = VL53L0X_MODE_CONTINUOUS;
+		rc = sensor_attr_set(vl53_devs[i], SENSOR_CHAN_DISTANCE,
+				     (enum sensor_attribute)SENSOR_ATTR_VL53L0X_MODE,
+				     &val);
 		if (rc != 0) {
 			LOG_WRN("VL53L0X[%d] continuous start failed: %d", i, rc);
-			continue;
+		} else {
+			cont_count++;
 		}
-
-		fast_count++;
 	}
 
-	fast_mode = (fast_count > 0);
-	LOG_INF("VL53L0X: %d/%d continuous mode", fast_count, online_count);
+	LOG_INF("VL53L0X: %d/%d continuous mode", cont_count, online_count);
 }
 
 /* ─── Poll ────────────────────────────────────────────────────────────────── */
-/* Port of Car::read_sensors() from luna_car.h:323-347 */
 
 static void store_mm(int i, int mm)
 {
@@ -144,20 +137,9 @@ static void poll_one(int i)
 		return;
 	}
 
-	/* Fast path: non-blocking read from continuous mode (~1 ms) */
-	if (fast_mode && fast[i].continuous) {
-		int mm = vl53l0x_fast_read(&fast[i]);
-		if (mm < 0) {
-			return; /* -EAGAIN or -EIO: keep previous value */
-		}
-		store_mm(i, mm);
-		return;
-	}
-
-	/* Fallback: stock driver blocking read (~33 ms) */
 	int rc = sensor_sample_fetch(vl53_devs[i]);
 	if (rc != 0) {
-		return;
+		return; /* -EAGAIN (no new data) or error: keep previous value */
 	}
 
 	struct sensor_value val;
@@ -166,6 +148,7 @@ static void poll_one(int i)
 		return;
 	}
 
+	/* Convert meters.microns to mm (== cm×10) */
 	int mm = val.val1 * 1000 + val.val2 / 1000;
 	store_mm(i, mm);
 }
