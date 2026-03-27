@@ -81,12 +81,24 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 			state, stuck, (double)trn, how_clr, dif);
 }
 
+/* ─── Blocking-loop helper ─────────────────────────────────────────────────── */
+/* go_back / go_back_long / wrong-way handler block the control thread for
+ * seconds.  The heartbeat LED only toggles at the top of the main loop, so
+ * it freezes while any of these run.  This helper keeps both the watchdog
+ * and the LED alive from inside blocking loops. */
+
+extern void wdt_feed_kick(void);
+
+static void keep_alive(void)
+{
+	wdt_feed_kick();
+	gpio_pin_toggle_dt(&heartbeat_led);
+}
+
 /* ─── go_back() ───────────────────────────────────────────────────────────── */
 /* Port from Umbreon_roborace.ino:1060-1084
  * Fixed: ESC double-tap sequence (brake→neutral→reverse) so the ESC
  * actually engages reverse gear instead of just braking. */
-
-extern void wdt_feed_kick(void);
 
 /* Minimum reverse distance before checking front clearance (m) */
 #define REVERSE_MIN_DIST  0.13f
@@ -119,7 +131,7 @@ static void go_back(void)
 	car_write_speed(0);
 	int64_t deadline = k_uptime_get() + 2000;
 	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		wdt_feed_kick();
+		keep_alive();
 		k_msleep(10);
 	}
 
@@ -129,7 +141,7 @@ static void go_back(void)
 	car_write_steer(escape_steer);
 	car_write_speed(REVERSE_SPEED);
 	k_msleep(120);
-	wdt_feed_kick();
+	keep_alive();
 	car_write_speed(0);
 	k_msleep(80);
 
@@ -143,7 +155,7 @@ static void go_back(void)
 	deadline = reverse_start + REVERSE_TIMEOUT;
 
 	while (k_uptime_get() < deadline) {
-		wdt_feed_kick();
+		keep_alive();
 
 		s = sensors_poll_mask(alt ? MASK_FRONT_R : MASK_FRONT_L);
 		alt = !alt;
@@ -188,17 +200,16 @@ static void go_back_long(void)
 	car_write_speed(0);
 	int64_t deadline = k_uptime_get() + 2000;
 	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		wdt_feed_kick();
+		keep_alive();
 		k_msleep(10);
 	}
 	car_write_speed(REVERSE_SPEED);
-	k_msleep(1000);
-	wdt_feed_kick();
+	for (int i = 0; i < 50; i++) { k_msleep(20); keep_alive(); }
 	car_write_speed(0);
 	k_msleep(80);
+	keep_alive();
 	car_write_speed(REVERSE_SPEED);
-	k_msleep(1800);
-	wdt_feed_kick();
+	for (int i = 0; i < 90; i++) { k_msleep(20); keep_alive(); }
 	car_write_speed(0);
 	send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
 }
@@ -340,6 +351,7 @@ static void work(void)
 	if (wrong_way) {
 		car_write_speed(0);
 		k_msleep(100);
+		keep_alive();
 		car_write_steer(cfg.race_cw ? 1000 : -1000);
 		k_msleep(20);
 		go_back_long();
@@ -348,6 +360,7 @@ static void work(void)
 
 		int64_t strt = k_uptime_get();
 		while ((k_uptime_get() - strt) < 900) {
+			keep_alive();
 			sensors_poll();
 			imu_update();
 			car_pid_control();
