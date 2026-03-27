@@ -6,9 +6,10 @@ if(USB_CONSOLE)
   list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/usb_console.overlay)
 endif()
 
-# Register out-of-tree VL53L0X enhanced driver module
+# Register out-of-tree driver modules
 list(APPEND ZEPHYR_EXTRA_MODULES
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/vl53l0x_enhanced
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/ssd1306_oled
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

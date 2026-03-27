@@ -1,0 +1,20 @@
+menuconfig SSD1306_OLED
+	bool "SSD1306 OLED custom display driver"
+	default y
+	depends on DT_HAS_SOLOMON_SSD1306FB_ENABLED
+	depends on I2C
+	help
+	  Custom SSD1306 I2C display driver with Arduino-proven init
+	  sequence (Adafruit SSD1306). Replaces stock CONFIG_SSD1306.
+	  Implements standard Zephyr display_driver_api for CFB compatibility.
+
+if SSD1306_OLED
+
+config SSD1306_OLED_DEFAULT_CONTRAST
+	int "Default contrast (0-255)"
+	default 207
+	help
+	  Default contrast level. 207 (0xCF) matches Adafruit's default
+	  for 128x64 displays with internal VCC.
+
+endif # SSD1306_OLED

@@ -1,0 +1,5 @@
+name: ssd1306_oled
+
+build:
+  cmake: .
+  kconfig: Kconfig
