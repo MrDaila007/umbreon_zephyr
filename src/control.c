@@ -81,137 +81,263 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 			state, stuck, (double)trn, how_clr, dif);
 }
 
-/* ─── Blocking-loop helper ─────────────────────────────────────────────────── */
-/* go_back / go_back_long / wrong-way handler block the control thread for
- * seconds.  The heartbeat LED only toggles at the top of the main loop, so
- * it freezes while any of these run.  This helper keeps both the watchdog
- * and the LED alive from inside blocking loops. */
-
 extern void wdt_feed_kick(void);
 
-static void keep_alive(void)
+/* ─── Recovery constants ──────────────────────────────────────────────────── */
+#define REVERSE_MIN_DIST  0.13f  /* m — minimum distance before early exit  */
+#define REVERSE_TIMEOUT   1500   /* ms — maximum reverse phase              */
+#define REVERSE_MIN_TIME  400    /* ms — minimum time before early exit     */
+#define REVERSE_SPEED     (-250) /* raw -1000…+1000 scale                   */
+#define STOP_WAIT_TIMEOUT 2000   /* ms — max wait for wheels to stop        */
+#define DTAP_BRAKE_MS     120    /* ms — first (brake) pulse of double-tap  */
+#define DTAP_NEUTRAL_MS   80     /* ms — neutral gap in double-tap          */
+#define WDIR_PRE_STOP_MS  100    /* ms — neutral before wrong-way steer     */
+#define WDIR_STEER_MS     20     /* ms — hold full-lock before long reverse */
+#define WDIR_REV1_MS      1000   /* ms — first reverse phase (long)         */
+#define WDIR_NEUTRAL_MS   80     /* ms — gap between long reverse phases    */
+#define WDIR_REV2_MS      1800   /* ms — second reverse phase (long)        */
+#define WDIR_FWD_MS       900    /* ms — forward-drive after long reverse   */
+#define WDIR_FWD_SPEED    2.0f   /* m/s — forward burst speed               */
+
+/* ─── Non-blocking recovery state machine ─────────────────────────────────── */
+/*
+ * All recovery maneuvers (stuck → go_back, wrong-way → go_back_long) are
+ * driven as a state machine inside the normal 40 ms control loop.  Each tick
+ * the main loop still polls sensors, updates IMU, feeds the watchdog, toggles
+ * the heartbeat LED, sends telemetry, and checks battery — nothing blocks.
+ */
+
+enum recovery_phase {
+	REC_NONE = 0,
+
+	/* ── go_back (stuck recovery) ─────────────────────────── */
+	REC_STOP_WAIT,       /* decelerate, wait for speed < 0.1  */
+	REC_DTAP_BRAKE,      /* double-tap: first reverse pulse    */
+	REC_DTAP_NEUTRAL,    /* double-tap: neutral gap            */
+	REC_REVERSE,         /* actual reverse with sensor checks  */
+	REC_REVERSE_DONE,    /* cleanup, return to normal driving  */
+
+	/* ── go_back_long (wrong-way recovery) ────────────────── */
+	REC_WD_PRE_STOP,     /* brief neutral before steer lock    */
+	REC_WD_STEER,        /* full steer lock                    */
+	REC_WD_STOP_WAIT,    /* decelerate                         */
+	REC_WD_REV1,         /* first long reverse (= brake tap)   */
+	REC_WD_NEUTRAL,      /* neutral gap (= double-tap)         */
+	REC_WD_REV2,         /* second long reverse (real reverse)  */
+	REC_WD_FWD,          /* forward burst with PID             */
+	REC_WD_DONE,         /* cleanup                            */
+};
+
+static struct {
+	enum recovery_phase phase;
+	int64_t             deadline;  /* phase timeout                      */
+	int64_t             start;     /* phase start timestamp              */
+	int                 escape_steer;
+	uint32_t            enc_start; /* encoder count at reverse start     */
+	float               resume_spd;/* speed to restore after go_back     */
+	int                 alt;       /* sensor alternation flag            */
+} rec;
+
+static void recovery_reset(void)
 {
-	wdt_feed_kick();
-	gpio_pin_toggle_dt(&heartbeat_led);
+	if (rec.phase != REC_NONE) {
+		car_write_speed(0);
+	}
+	rec.phase = REC_NONE;
 }
 
-/* ─── go_back() ───────────────────────────────────────────────────────────── */
-/* Port from Umbreon_roborace.ino:1060-1084
- * Fixed: ESC double-tap sequence (brake→neutral→reverse) so the ESC
- * actually engages reverse gear instead of just braking. */
-
-/* Minimum reverse distance before checking front clearance (m) */
-#define REVERSE_MIN_DIST  0.13f
-/* Maximum reverse duration (ms) */
-#define REVERSE_TIMEOUT   1500
-/* Minimum time in reverse before allowing early exit (ms) */
-#define REVERSE_MIN_TIME  400
-/* Reverse ESC command (raw -1000…+1000 scale) */
-#define REVERSE_SPEED     (-250)
-
-static void go_back(void)
+static int pick_escape_steer(const int *s)
 {
-	/* 1. Read side sensors to decide escape direction */
-	int *s = sensors_poll_mask(MASK_SIDES);
-	int left_space  = s[IDX_LEFT];
-	int right_space = s[IDX_RIGHT];
+	int l = s[IDX_LEFT];
+	int r = s[IDX_RIGHT];
+	if (l > r + 50)  return -600;
+	if (r > l + 50)  return  600;
+	return cfg.race_cw ? -600 : 600;
+}
 
-	int escape_steer;
-	if (left_space > right_space + 50) {
-		escape_steer = -600;
-	} else if (right_space > left_space + 50) {
-		escape_steer = 600;
-	} else {
-		escape_steer = cfg.race_cw ? -600 : 600;
-	}
+static void update_escape_steer(const int *s)
+{
+	int l = s[IDX_LEFT];
+	int r = s[IDX_RIGHT];
+	if (l > r + 100)      rec.escape_steer = -600;
+	else if (r > l + 100) rec.escape_steer =  600;
+}
 
-	send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
-
-	/* 2. Wait for wheels to stop */
+/* Start stuck recovery (go_back equivalent) */
+static void recovery_start_stuck(const int *s, float resume_spd)
+{
+	rec.phase        = REC_STOP_WAIT;
+	rec.escape_steer = pick_escape_steer(s);
+	rec.resume_spd   = resume_spd;
+	rec.deadline     = k_uptime_get() + STOP_WAIT_TIMEOUT;
+	rec.alt          = 0;
 	car_write_speed(0);
-	int64_t deadline = k_uptime_get() + 2000;
-	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		keep_alive();
-		k_msleep(10);
-	}
+	send_run_state(RUN_REVERSE, stuck_time, turns, 0, rec.escape_steer);
+}
 
-	/* 3. ESC double-tap: most RC ESCs need brake→neutral→reverse to
-	 *    engage reverse gear.  Without this the first reverse signal
-	 *    only brakes and the car stays in place. */
-	car_write_steer(escape_steer);
-	car_write_speed(REVERSE_SPEED);
-	k_msleep(120);
-	keep_alive();
+/* Start wrong-way recovery (go_back_long equivalent) */
+static void recovery_start_wrong_way(void)
+{
+	rec.phase    = REC_WD_PRE_STOP;
+	rec.deadline = k_uptime_get() + WDIR_PRE_STOP_MS;
 	car_write_speed(0);
-	k_msleep(80);
+	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
+}
 
-	/* 4. Actual reverse — take encoder snapshot after double-tap so
-	 *    the braking phase doesn't count as travel distance. */
-	uint32_t start_count = taho_get_count();
-	int alt = 0;
+/*
+ * recovery_tick() — called once per loop iteration while rec.phase != REC_NONE.
+ * Sensors and IMU are already polled by the caller.
+ * Returns true while recovery is in progress, false when done.
+ */
+static bool recovery_tick(int *s)
+{
+	int64_t now = k_uptime_get();
 
-	car_write_speed(REVERSE_SPEED);
-	int64_t reverse_start = k_uptime_get();
-	deadline = reverse_start + REVERSE_TIMEOUT;
+	switch (rec.phase) {
 
-	while (k_uptime_get() < deadline) {
-		keep_alive();
+	/* ════════════════════════════════════════════════════════════════════ */
+	/*  STUCK RECOVERY  (go_back equivalent)                              */
+	/* ════════════════════════════════════════════════════════════════════ */
 
-		s = sensors_poll_mask(alt ? MASK_FRONT_R : MASK_FRONT_L);
-		alt = !alt;
+	case REC_STOP_WAIT:
+		if (taho_get_speed() <= 0.1f || now >= rec.deadline) {
+			rec.phase    = REC_DTAP_BRAKE;
+			rec.deadline = now + DTAP_BRAKE_MS;
+			car_write_steer(rec.escape_steer);
+			car_write_speed(REVERSE_SPEED);
+		}
+		return true;
 
-		/* Skip early-exit check until minimum reverse time elapsed */
-		if ((k_uptime_get() - reverse_start) >= REVERSE_MIN_TIME) {
-			uint32_t delta = taho_get_count() - start_count;
-			float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
-				     / (float)cfg.encoder_holes;
+	case REC_DTAP_BRAKE:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_DTAP_NEUTRAL;
+			rec.deadline = now + DTAP_NEUTRAL_MS;
+			car_write_speed(0);
+		}
+		return true;
+
+	case REC_DTAP_NEUTRAL:
+		if (now >= rec.deadline) {
+			rec.phase     = REC_REVERSE;
+			rec.start     = now;
+			rec.deadline  = now + REVERSE_TIMEOUT;
+			rec.enc_start = taho_get_count();
+			car_write_speed(REVERSE_SPEED);
+		}
+		return true;
+
+	case REC_REVERSE: {
+		s = sensors_poll_mask(rec.alt ? MASK_FRONT_R : MASK_FRONT_L);
+		rec.alt = !rec.alt;
+
+		if ((now - rec.start) >= REVERSE_MIN_TIME) {
+			uint32_t delta = taho_get_count() - rec.enc_start;
+			float dist = ((float)delta * (float)M_PI *
+				      cfg.wheel_diam_m) /
+				     (float)cfg.encoder_holes;
 
 			bool front_clear =
 				s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
 				s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
 
 			if (front_clear && dist >= REVERSE_MIN_DIST) {
+				rec.phase = REC_REVERSE_DONE;
 				break;
 			}
 		}
 
-		/* Update escape direction from sides */
-		left_space  = s[IDX_LEFT];
-		right_space = s[IDX_RIGHT];
-		if (left_space > right_space + 100) {
-			escape_steer = -600;
-		} else if (right_space > left_space + 100) {
-			escape_steer = 600;
+		update_escape_steer(s);
+		car_write_steer(rec.escape_steer);
+		send_run_state(RUN_REVERSE, stuck_time, turns,
+			       0, rec.escape_steer);
+
+		if (now >= rec.deadline) {
+			rec.phase = REC_REVERSE_DONE;
 		}
-		car_write_steer(escape_steer);
-
-		send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
-		k_msleep(10);
+		return true;
 	}
 
-	car_write_speed(0);
-	car_write_steer(escape_steer);
-	send_run_state(RUN_REVERSE, 0, turns, 0, escape_steer);
-}
+	case REC_REVERSE_DONE:
+		car_write_speed(0);
+		car_write_steer(rec.escape_steer);
+		send_run_state(RUN_REVERSE, 0, turns, 0, rec.escape_steer);
+		car_write_speed_ms(rec.resume_spd);
+		stuck_time = 0;
+		imu_reset_heading();
+		rec.phase = REC_NONE;
+		return false;
 
-static void go_back_long(void)
-{
-	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
-	car_write_speed(0);
-	int64_t deadline = k_uptime_get() + 2000;
-	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		keep_alive();
-		k_msleep(10);
+	/* ════════════════════════════════════════════════════════════════════ */
+	/*  WRONG-WAY RECOVERY  (go_back_long equivalent)                     */
+	/* ════════════════════════════════════════════════════════════════════ */
+
+	case REC_WD_PRE_STOP:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_WD_STEER;
+			rec.deadline = now + WDIR_STEER_MS;
+			car_write_steer(cfg.race_cw ? 1000 : -1000);
+		}
+		return true;
+
+	case REC_WD_STEER:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_WD_STOP_WAIT;
+			rec.deadline = now + STOP_WAIT_TIMEOUT;
+			car_write_speed(0);
+		}
+		return true;
+
+	case REC_WD_STOP_WAIT:
+		if (taho_get_speed() <= 0.1f || now >= rec.deadline) {
+			rec.phase    = REC_WD_REV1;
+			rec.deadline = now + WDIR_REV1_MS;
+			car_write_speed(REVERSE_SPEED);
+		}
+		return true;
+
+	case REC_WD_REV1:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_WD_NEUTRAL;
+			rec.deadline = now + WDIR_NEUTRAL_MS;
+			car_write_speed(0);
+		}
+		return true;
+
+	case REC_WD_NEUTRAL:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_WD_REV2;
+			rec.deadline = now + WDIR_REV2_MS;
+			car_write_speed(REVERSE_SPEED);
+		}
+		return true;
+
+	case REC_WD_REV2:
+		if (now >= rec.deadline) {
+			rec.phase    = REC_WD_FWD;
+			rec.deadline = now + WDIR_FWD_MS;
+			car_write_steer(cfg.race_cw ? -700 : 700);
+			car_write_speed_ms(WDIR_FWD_SPEED);
+		}
+		return true;
+
+	case REC_WD_FWD:
+		car_pid_control();
+		if (now >= rec.deadline) {
+			rec.phase = REC_WD_DONE;
+		}
+		return true;
+
+	case REC_WD_DONE:
+		car_write_speed(0);
+		turns = 0.0f;
+		imu_reset_heading();
+		rec.phase = REC_NONE;
+		return false;
+
+	case REC_NONE:
+	default:
+		return false;
 	}
-	car_write_speed(REVERSE_SPEED);
-	for (int i = 0; i < 50; i++) { k_msleep(20); keep_alive(); }
-	car_write_speed(0);
-	k_msleep(80);
-	keep_alive();
-	car_write_speed(REVERSE_SPEED);
-	for (int i = 0; i < 90; i++) { k_msleep(20); keep_alive(); }
-	car_write_speed(0);
-	send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
 }
 
 /* ─── Telemetry ───────────────────────────────────────────────────────────── */
@@ -238,12 +364,18 @@ static void send_idle_telemetry(void)
 }
 
 /* ─── work() — main autonomous control ────────────────────────────────────── */
-/* Port from Umbreon_roborace.ino:1087-1240 */
 
 static void work(void)
 {
 	int *s = sensors_poll();
 	imu_update();
+
+	/* ── Recovery in progress? Just tick the state machine ─────────── */
+	if (rec.phase != REC_NONE) {
+		recovery_tick(s);
+		send_telemetry(s, rec.escape_steer, 0.0f);
+		return;
+	}
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
 	int diff;
@@ -285,9 +417,9 @@ static void work(void)
 
 	/* Track learning integration */
 	if (track_learn_get_mode() == TRK_MODE_RACE) {
-		float rec = track_learn_recommend_speed(0.5f);
-		if (rec > 0) {
-			spd = rec;
+		float rec_spd = track_learn_recommend_speed(0.5f);
+		if (rec_spd > 0) {
+			spd = rec_spd;
 		}
 	}
 	track_learn_tick((int)(diff * coef), spd);
@@ -329,10 +461,7 @@ static void work(void)
 	}
 
 	if (stuck_time > cfg.stuck_thresh) {
-		go_back();
-		car_write_speed_ms(spd);
-		stuck_time = 0;
-		imu_reset_heading();
+		recovery_start_stuck(s, spd);
 	}
 
 	/* ── Wrong-direction detection ─────────────────────────────────────── */
@@ -349,25 +478,7 @@ static void work(void)
 				      : (turns < -cfg.wrong_dir_deg);
 
 	if (wrong_way) {
-		car_write_speed(0);
-		k_msleep(100);
-		keep_alive();
-		car_write_steer(cfg.race_cw ? 1000 : -1000);
-		k_msleep(20);
-		go_back_long();
-		car_write_steer(cfg.race_cw ? -700 : 700);
-		car_write_speed_ms(2.0f);
-
-		int64_t strt = k_uptime_get();
-		while ((k_uptime_get() - strt) < 900) {
-			keep_alive();
-			sensors_poll();
-			imu_update();
-			car_pid_control();
-			k_msleep(10);
-		}
-		turns = 0.0f;
-		imu_reset_heading();
+		recovery_start_wrong_way();
 	}
 }
 
@@ -509,6 +620,7 @@ void control_cmd_start(void)
 {
 	car_pid_reset();
 	imu_reset_heading();
+	recovery_reset();
 	stuck_time = 0;
 	turns = 0.0f;
 	run_telem_div = 0;
@@ -546,6 +658,7 @@ void control_cmd_stop(void)
 	car_running = false;
 	monitor_mode = false;
 	display_notify_run_state(false);
+	recovery_reset();
 	drv_enabled = false;
 	manual_mode = false;
 	manual_steer = 0;
