@@ -34,6 +34,16 @@ LOG_MODULE_REGISTER(control, LOG_LEVEL_INF);
 static K_THREAD_STACK_DEFINE(control_stack, CONTROL_STACK_SIZE);
 static struct k_thread control_thread_data;
 
+/* Periodic loop: timer + semaphore (yields CPU between iterations; not busy-wait). */
+static struct k_timer control_period_timer;
+static struct k_sem control_period_sem;
+
+static void control_period_timer_cb(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	(void)k_sem_give(&control_period_sem);
+}
+
 /* ─── State ───────────────────────────────────────────────────────────────── */
 static volatile bool car_running;
 static volatile bool manual_mode;
@@ -42,6 +52,10 @@ static volatile bool monitor_mode;
 static volatile int manual_steer;
 static volatile float manual_speed;
 static volatile int64_t last_drv_ms;
+
+/* START countdown: armed in control_cmd_start(), runs in control_thread (wifi_cmd not blocked). */
+static volatile bool start_countdown_active;
+static int64_t start_deadline_ms;
 
 /* Stuck detection (persistent across work() calls) */
 static int stuck_time;
@@ -531,43 +545,61 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 	LOG_INF("Control thread started (period=%d ms)", cfg.loop_ms);
 
-	int64_t next_loop = k_uptime_get();
+	int period_ms = cfg.loop_ms > 0 ? cfg.loop_ms : 40;
+	k_sem_init(&control_period_sem, 0, 128);
+	k_timer_init(&control_period_timer, control_period_timer_cb, NULL);
+	k_timer_start(&control_period_timer, K_MSEC(0), K_MSEC(period_ms));
 
+	/*
+	 * One iteration per timer period: semaphore wait yields the CPU until the
+	 * next tick (same role as the old k_msleep-based rate limiter, not a busy-wait).
+	 */
 	while (1) {
+		k_sem_take(&control_period_sem, K_FOREVER);
+
 		wdt_feed_kick();
 		gpio_pin_toggle_dt(&heartbeat_led);
 
 		int64_t now = k_uptime_get();
-		if (now < next_loop) {
-			k_msleep(next_loop - now);
-			now = k_uptime_get();
+
+		bool idle_only = false;
+
+		if (start_countdown_active) {
+			if (now >= start_deadline_ms) {
+				start_countdown_active = false;
+				car_running = true;
+				display_notify_run_state(true);
+				wifi_cmd_send("$STS:RUN\n");
+			} else {
+				send_idle_telemetry();
+				idle_only = true;
+			}
 		}
-		next_loop = (next_loop + cfg.loop_ms > now)
-			    ? next_loop + cfg.loop_ms
-			    : now + cfg.loop_ms;
 
 		/* Manual drive active? */
 		bool drv_active = drv_enabled && manual_mode &&
 				  (k_uptime_get() - last_drv_ms < 500);
 
-		if (monitor_mode && !car_running) {
-			/* Diagnostic monitor mode */
-			work_monitor();
-		} else if (car_running && !drv_active) {
-			/* Autonomous mode */
-			manual_mode = false;
-			work();
-		} else if (drv_active) {
-			/* Manual drive mode */
-			int *s = sensors_poll();
-			imu_update();
-			car_write_steer(manual_steer);
-			car_write_speed_ms(manual_speed);
-			car_pid_control();
-			send_telemetry(s, manual_steer, manual_speed);
-		} else {
-			/* Idle — still send telemetry */
-			send_idle_telemetry();
+		if (!idle_only) {
+			if (monitor_mode && !car_running) {
+				/* Diagnostic monitor mode */
+				work_monitor();
+			} else if (car_running && !drv_active) {
+				/* Autonomous mode */
+				manual_mode = false;
+				work();
+			} else if (drv_active) {
+				/* Manual drive mode */
+				int *s = sensors_poll();
+				imu_update();
+				car_write_steer(manual_steer);
+				car_write_speed_ms(manual_speed);
+				car_pid_control();
+				send_telemetry(s, manual_steer, manual_speed);
+			} else {
+				/* Idle — still send telemetry */
+				send_idle_telemetry();
+			}
 		}
 
 		/* Low-voltage safety cutoff */
@@ -577,8 +609,10 @@ static void control_thread(void *p1, void *p2, void *p3)
 			if (bat_low_since == 0) {
 				bat_low_since = now;
 			} else if (now - bat_low_since > 10000) {
-				if (car_running || drv_enabled) {
+				if (car_running || drv_enabled ||
+				    start_countdown_active) {
 					car_running = false;
+					start_countdown_active = false;
 					display_notify_run_state(false);
 					drv_enabled = false;
 					manual_mode = false;
@@ -625,25 +659,20 @@ void control_cmd_start(void)
 	turns = 0.0f;
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
+	monitor_mode = false;
+	car_running = false;
 	wifi_cmd_send("$ACK\n");
 
-	/* 5-second countdown — idle telemetry flows */
-	int64_t start_at = k_uptime_get() + 5000;
-	while (k_uptime_get() < start_at) {
-		wdt_feed_kick();
-		send_idle_telemetry();
-		k_msleep(cfg.loop_ms);
-	}
-
-	car_running = true;
-	display_notify_run_state(true);
-	wifi_cmd_send("$STS:RUN\n");
+	/* 5 s countdown runs in control_thread; wifi_cmd thread returns immediately. */
+	start_deadline_ms = k_uptime_get() + 5000;
+	start_countdown_active = true;
 }
 
 void control_cmd_monitor(void)
 {
 	imu_reset_heading();
 	monitor_mode = true;
+	start_countdown_active = false;
 	wifi_cmd_send("$ACK\n");
 	wifi_cmd_send("$STS:MONITOR\n");
 }
@@ -656,6 +685,7 @@ bool control_is_monitor(void)
 void control_cmd_stop(void)
 {
 	car_running = false;
+	start_countdown_active = false;
 	monitor_mode = false;
 	display_notify_run_state(false);
 	recovery_reset();

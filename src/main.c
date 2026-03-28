@@ -148,7 +148,10 @@ int main(void)
 	display_init();
 
 	/* Send boot status via WiFi */
-	k_msleep(200); /* Let ESP boot */
+	for (int i = 0; i < 2; i++) {
+		k_msleep(100);
+		wdt_feed_kick();
+	}
 	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s\n",
 			sensors_online_count(), FW_VERSION);
 
@@ -157,8 +160,11 @@ int main(void)
 	if (!cfg.calibrated) {
 		car_run_calibration(); /* feeds wdt internally */
 	} else {
-		/* Allow ESC to arm and sensors to start */
-		k_msleep(3700);
+		/* Allow ESC to arm and sensors to start (chunked so WDT stays fed). */
+		for (int i = 0; i < 37; i++) {
+			k_msleep(100);
+			wdt_feed_kick();
+		}
 	}
 
 	/* Start control thread */

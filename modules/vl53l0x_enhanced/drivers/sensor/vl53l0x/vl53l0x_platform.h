@@ -177,6 +177,12 @@ VL53L0X_Error VL53L0X_UpdateByte(VL53L0X_DEV Dev, uint8_t index,
  * @code
  * #define VL53L0X_PollingDelay(...) (void)0
  * @endcode
+ *
+ * Continuous measurement (GetMeasurementDataReady + GetRangingMeasurementData)
+ * does not use the measurement_poll_for_completion() loop, so this delay is
+ * not on the hot read path. CONFIG_VL53L0X_ENHANCED_ST_POLLING_DELAY_MS
+ * controls sleep duration (0 = none).
+ *
  * @param Dev       Device Handle
  * @return  VL53L0X_ERROR_NONE        Success
  * @return  "Other error code"    See ::VL53L0X_Error

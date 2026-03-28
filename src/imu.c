@@ -19,6 +19,8 @@
 
 LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 
+extern void wdt_feed_kick(void);
+
 /* ─── Constants ───────────────────────────────────────────────────────────── */
 #define IMU_EMA_ALPHA  0.3f   /* EMA smoothing (low = smooth, high = responsive) */
 #define IMU_DEADZONE   0.4f   /* ignore rates below this (°/s) — kills drift */
@@ -72,6 +74,9 @@ void imu_calibrate(void)
 	int count = 0;
 
 	for (int i = 0; i < CAL_SAMPLES; i++) {
+		if ((i % 40) == 0) {
+			wdt_feed_kick();
+		}
 		int rc = sensor_sample_fetch(mpu_dev);
 		if (rc != 0) {
 			k_msleep(CAL_DELAY_MS);
