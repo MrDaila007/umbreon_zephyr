@@ -242,7 +242,7 @@ static bool recovery_tick(int *s)
 
 			if (front_clear && dist >= REVERSE_MIN_DIST) {
 				rec.phase = REC_REVERSE_DONE;
-				break;
+				return true;
 			}
 		}
 
