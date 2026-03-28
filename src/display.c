@@ -30,14 +30,26 @@
 
 LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 
+/* 0 = hardware probe only (display_init logs); 1 = full OLED thread + encoder wake */
+#ifndef DISPLAY_UI_THREAD
+#define DISPLAY_UI_THREAD 0
+#endif
+#if DISPLAY_UI_THREAD
+#define DISPLAY_UI_FN_ATTR
+#else
+#define DISPLAY_UI_FN_ATTR __attribute__((unused))
+#endif
+
 /* ─── Thread config ──────────────────────────────────────────────────────── */
 #define DISPLAY_STACK_SIZE   2048
 #define DISPLAY_PRIORITY     8
 #define DISPLAY_REFRESH_MS   120
 #define INACTIVITY_MS        10000
 
+#if DISPLAY_UI_THREAD
 static K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
 static struct k_thread display_thread_data;
+#endif
 
 /* ─── I2C0 bus mutex (shared with IMU) ───────────────────────────────────── */
 K_MUTEX_DEFINE(i2c0_mutex);
@@ -582,7 +594,7 @@ static void run_test(int idx)
 
 /* ─── Input handling ─────────────────────────────────────────────────────── */
 
-static void handle_input(void)
+static DISPLAY_UI_FN_ATTR void handle_input(void)
 {
 	int rot = 0;
 	uint8_t events = encoder_poll(&rot);
@@ -758,7 +770,7 @@ static void handle_input(void)
 
 /* ─── Render current screen ──────────────────────────────────────────────── */
 
-static void draw_current_screen(void)
+static DISPLAY_UI_FN_ATTR void draw_current_screen(void)
 {
 	switch (cur_scr) {
 	case SCR_DASHBOARD:
@@ -795,8 +807,9 @@ static void draw_current_screen(void)
 	}
 }
 
-/* ─── Display thread ─────────────────────────────────────────────────────── */
+/* ─── Display thread (compiled only when DISPLAY_UI_THREAD) ──────────────── */
 
+#if DISPLAY_UI_THREAD
 static void display_thread(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1);
@@ -923,11 +936,7 @@ static void display_thread(void *p1, void *p2, void *p3)
 	}
 }
 
-/* ─── Encoder double-click watcher (runs in encoder ISR context via poll) ── */
-/* The display thread is blocked on k_event_wait when sleeping.
- * We need a way to detect double-click while sleeping.
- * Use a k_work to poll encoder from system workqueue. */
-
+/* ─── Encoder double-click watcher ───────────────────────────────────────── */
 static struct k_work_delayable enc_watch_work;
 
 static void enc_watch_handler(struct k_work *work)
@@ -946,23 +955,22 @@ static void enc_watch_handler(struct k_work *work)
 
 	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 }
+#endif /* DISPLAY_UI_THREAD */
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
 
 void display_init(void)
 {
-	/* Display functionality disabled — only verify hardware is reachable.
-	 * Uncomment thread creation when ready to enable full menu. */
+	/* With DISPLAY_UI_THREAD=0, only this log runs (no OLED thread / encoder poll). */
 	LOG_INF("Display module disabled (hardware check only)");
 
-#if 0  /* Enable when display is verified working */
+#if DISPLAY_UI_THREAD
 	k_thread_create(&display_thread_data, display_stack,
 			K_THREAD_STACK_SIZEOF(display_stack),
 			display_thread, NULL, NULL, NULL,
 			DISPLAY_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&display_thread_data, "display");
 
-	/* Start encoder watcher for double-click wake detection */
 	k_work_init_delayable(&enc_watch_work, enc_watch_handler);
 	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 #endif
