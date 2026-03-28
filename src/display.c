@@ -802,21 +802,49 @@ static void display_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
+	wifi_cmd_printf("$L:DISP thread started\n");
+
+	/* ── Diagnose I2C bus ──────────────────────────────────────── */
+	const struct device *i2c_bus = DEVICE_DT_GET(DT_NODELABEL(i2c_oled));
+	wifi_cmd_printf("$L:DISP i2c_oled ready=%d\n",
+			device_is_ready(i2c_bus));
+	if (device_is_ready(i2c_bus)) {
+		/* Probe SSD1306 at 0x3C — just read 1 byte */
+		uint8_t dummy;
+		int probe_rc = i2c_read(i2c_bus, &dummy, 1, 0x3C);
+		wifi_cmd_printf("$L:DISP i2c probe 0x3C rc=%d\n", probe_rc);
+	}
+
 	oled_dev = DEVICE_DT_GET(DT_NODELABEL(ssd1306));
+	wifi_cmd_printf("$L:DISP dev=%p ready=%d\n", oled_dev,
+			device_is_ready(oled_dev));
 	if (!device_is_ready(oled_dev)) {
 		LOG_ERR("SSD1306 not ready — display disabled");
+		wifi_cmd_printf("$L:DISP FAIL: device not ready!\n");
 		return;
 	}
 
 	int cfb_rc = cfb_framebuffer_init(oled_dev);
+	wifi_cmd_printf("$L:DISP cfb_init rc=%d\n", cfb_rc);
 	if (cfb_rc) {
 		LOG_ERR("CFB init failed: %d", cfb_rc);
 		return;
 	}
-	display_blanking_on(oled_dev);  /* start blanked (OFF) */
-
 	cfb_framebuffer_set_font(oled_dev, 0);  /* default 6x8 */
-	LOG_INF("OLED display ready (128x64, off by default)");
+	LOG_INF("OLED display ready (128x64)");
+
+	/* ── Splash screen ─────────────────────────────────────────── */
+	int rc;
+	rc = display_blanking_off(oled_dev);
+	wifi_cmd_printf("$L:DISP blanking_off rc=%d\n", rc);
+	cfb_framebuffer_clear(oled_dev, false);
+	cfb_print(oled_dev, "   UMBREON", 0, 20);
+	cfb_print(oled_dev, "  roborace", 0, 32);
+	rc = cfb_framebuffer_finalize(oled_dev);
+	wifi_cmd_printf("$L:DISP splash finalize rc=%d\n", rc);
+	k_msleep(2000);
+	display_blanking_on(oled_dev);
+
 	wifi_cmd_printf("$L:OLED ready, waiting for double-click\n");
 
 	while (1) {
