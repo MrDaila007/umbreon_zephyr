@@ -28,4 +28,15 @@ config VL53L0X_ENHANCED_PROXIMITY_THRESHOLD
 	  Distance threshold for the SENSOR_CHAN_PROX channel.
 	  Values at or below this threshold report proximity = 1.
 
+config VL53L0X_ENHANCED_ST_POLLING_DELAY_MS
+	int "ST HAL VL53L0X_PollingDelay duration (ms), 0 disables"
+	default 2
+	range 0 10
+	help
+	  ST API calls this from single-shot completion loops, device reset,
+	  and init paths (e.g. get_info_from_device). Continuous read uses
+	  GetMeasurementDataReady + GetRangingMeasurementData and does not
+	  poll in a tight loop. Set to 0 to skip sleeping in polling hooks
+	  (less blocking; may stress I2C on some init paths).
+
 endif # VL53L0X_ENHANCED
