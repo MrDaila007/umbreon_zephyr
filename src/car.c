@@ -141,7 +141,7 @@ void car_pid_reset(void)
 	pid_integral = 0;
 	pid_prev_filtered = 0;
 	pid_filtered = 0;
-	pid_prev_cnt = 0;
+	pid_prev_cnt = taho_get_count();
 	pid_prev_ms = 0;
 	target_speed = 0;
 	pid_ref_applied = 0;

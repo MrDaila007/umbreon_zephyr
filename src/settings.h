@@ -81,7 +81,7 @@ extern struct car_settings cfg;
 #define DEFAULT_FOD         800
 #define DEFAULT_SOD         600
 #define DEFAULT_ACD         400
-#define DEFAULT_CFD         150
+#define DEFAULT_CFD         40     /* 4 cm */
 
 /* ─── ESC constants ───────────────────────────────────────────────────────── */
 #define NEUTRAL_SPEED       1500  /* µs — never changes */

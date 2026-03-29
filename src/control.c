@@ -160,7 +160,7 @@ static void maneuver_tick(void)
 		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_steer(mnv_steer);
 			car_write_speed(-150);
-			mnv_deadline = now + 500;
+			mnv_deadline = now + 250;
 			mnv = MNV_BACK_BRAKE;
 		}
 		break;
@@ -178,7 +178,7 @@ static void maneuver_tick(void)
 			car_write_speed(-150);
 			mnv_start_count = taho_get_count();
 			mnv_alt = 0;
-			mnv_deadline = now + 2000;
+			mnv_deadline = now + 1000;
 			mnv = MNV_BACK_REVERSE;
 		}
 		break;
@@ -385,7 +385,9 @@ static void work(void)
 	bool c_fr = s[IDX_FRONT_RIGHT] < cfg.close_front_dist;
 	bool low_speed = taho_get_speed() < 0.1f;
 
-	if (c_fl || c_fr || low_speed) {
+	bool blocked = c_fl || c_fr;
+
+	if (blocked && low_speed) {
 		stuck_time++;
 	} else {
 		stuck_time = 0;
