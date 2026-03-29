@@ -40,6 +40,10 @@ static inline uint32_t cyc_delta_us(uint32_t from_cyc, uint32_t to_cyc)
 	return (uint32_t)k_cyc_to_us_floor64(delta_cyc); /* small value — safe */
 }
 
+/* Reject only narrow EMI glitches on the optical line — not valid slot edges.
+ * 200 µs here falsely dropped real pulses (~15+ m/s with 68 holes on Ø65 mm ≈ 200 µs). */
+#define TAHO_GLITCH_FILTER_US  35
+
 /* ─── ISR ─────────────────────────────────────────────────────────────────── */
 /* Port of taho_interrupt() from luna_car.h:71-78 */
 static void tach_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
@@ -52,8 +56,7 @@ static void tach_isr(const struct device *dev, struct gpio_callback *cb, uint32_
 	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
 	uint32_t delta_us = cyc_delta_us(last_cyc, now_cyc);
 
-	/* Debounce: 200µs (supports up to ~5 m/s with 62-hole encoder) */
-	if (delta_us < 200) {
+	if (delta_us < TAHO_GLITCH_FILTER_US) {
 		return;
 	}
 
