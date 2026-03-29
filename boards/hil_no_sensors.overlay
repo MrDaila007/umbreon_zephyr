@@ -1,0 +1,30 @@
+/* Bare-controller HIL profile: controller only, no external sensors.
+ * Keeps UART/PWM/tachometer alive and disables IMU + ToF nodes. */
+
+&mpu6050 {
+	status = "disabled";
+};
+
+&vl53l0x_0 {
+	status = "disabled";
+};
+
+&vl53l0x_1 {
+	status = "disabled";
+};
+
+&vl53l0x_2 {
+	status = "disabled";
+};
+
+&vl53l0x_3 {
+	status = "disabled";
+};
+
+&vl53l0x_4 {
+	status = "disabled";
+};
+
+&vl53l0x_5 {
+	status = "disabled";
+};

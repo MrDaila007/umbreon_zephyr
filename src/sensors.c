@@ -13,32 +13,39 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
+#if DT_HAS_ST_VL53L0X_ENABLED
 #include <vl53l0x_enhanced.h>
+#endif
 
 LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 
 #define VL53L0X_MAX_RAW  8190  /* sensor overflow / out-of-range indicator */
 
+static int distances[SENSOR_COUNT]; /* cm×10 */
+static int online_count;
+
+#if DT_HAS_ST_VL53L0X_ENABLED
 /* ─── Device handles ──────────────────────────────────────────────────────── */
 static const struct device *vl53_devs[SENSOR_COUNT];
 static bool vl53_valid[SENSOR_COUNT];
-static int distances[SENSOR_COUNT]; /* cm×10 */
-static int online_count;
 
 extern void wdt_feed_kick(void);
 
 /* ─── Sensor nodelabel → device mapping ───────────────────────────────────── */
 #define VL53_DEV(idx, label) \
 	vl53_devs[idx] = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(label))
+#endif
 
 /* ─── Init ────────────────────────────────────────────────────────────────── */
 
 void sensors_init(void)
 {
+#if DT_HAS_ST_VL53L0X_ENABLED
 	/* Try I2C bus recovery before initializing sensors */
 	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 	if (device_is_ready(i2c1)) {
@@ -117,10 +124,18 @@ void sensors_init(void)
 	}
 
 	LOG_INF("VL53L0X: %d/%d continuous mode", cont_count, online_count);
+#else
+	online_count = 0;
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		distances[i] = 9999;
+	}
+	LOG_WRN("VL53 disabled by devicetree overlay (HIL no-sensors mode)");
+#endif
 }
 
 /* ─── Poll ────────────────────────────────────────────────────────────────── */
 
+#if DT_HAS_ST_VL53L0X_ENABLED
 static void store_mm(int i, int mm)
 {
 	if (mm >= VL53L0X_MAX_RAW || mm <= 0) {
@@ -152,22 +167,29 @@ static void poll_one(int i)
 	int mm = val.val1 * 1000 + val.val2 / 1000;
 	store_mm(i, mm);
 }
+#endif
 
 int *sensors_poll(void)
 {
+#if DT_HAS_ST_VL53L0X_ENABLED
 	for (int i = 0; i < SENSOR_COUNT; i++) {
 		poll_one(i);
 	}
+#endif
 	return distances;
 }
 
 int *sensors_poll_mask(uint8_t mask)
 {
+#if DT_HAS_ST_VL53L0X_ENABLED
 	for (int i = 0; i < SENSOR_COUNT; i++) {
 		if (mask & BIT(i)) {
 			poll_one(i);
 		}
 	}
+#else
+	ARG_UNUSED(mask);
+#endif
 	return distances;
 }
 

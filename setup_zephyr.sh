@@ -85,15 +85,15 @@ install_system_deps() {
             sudo apt-get update -qq
             sudo apt-get install -y -qq \
                 git cmake ninja-build python3 python3-pip python3-venv \
-                wget device-tree-compiler ccache dfu-util
+                wget device-tree-compiler ccache dfu-util openocd picocom
         elif command -v dnf >/dev/null 2>&1; then
             sudo dnf install -y \
                 git cmake ninja-build python3 python3-pip \
-                wget dtc ccache dfu-util
+                wget dtc ccache dfu-util openocd picocom
         elif command -v pacman >/dev/null 2>&1; then
             sudo pacman -S --noconfirm \
                 git cmake ninja python python-pip \
-                wget dtc ccache dfu-util
+                wget dtc ccache dfu-util openocd picocom
         else
             error "Cannot install packages automatically. Please install: ${missing[*]}"
         fi

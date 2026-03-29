@@ -6,6 +6,11 @@ if(USB_CONSOLE)
   list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/usb_console.overlay)
 endif()
 
+set(HIL_NO_SENSORS OFF CACHE BOOL "Disable IMU/VL53 nodes for bare-controller HIL")
+if(HIL_NO_SENSORS)
+  list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/hil_no_sensors.overlay)
+endif()
+
 # Register out-of-tree VL53L0X enhanced driver module
 list(APPEND ZEPHYR_EXTRA_MODULES
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/vl53l0x_enhanced

@@ -129,6 +129,40 @@ make flash
 
 Or manually: `cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/`
 
+### HIL bring-up (bare controller, no sensors)
+
+Use this profile when the board is connected only to debugger/console wires.
+
+#### Wiring
+
+- ST-Link V2 `SWDIO` -> Pico 2 `SWDIO`
+- ST-Link V2 `SWCLK` -> Pico 2 `SWCLK`
+- ST-Link V2 `GND` -> Pico 2 `GND`
+- Optional USB-TTL for UART0 logs:
+  - USB-TTL `RX` -> Pico 2 `GP16` (UART0 TX)
+  - USB-TTL `TX` -> Pico 2 `GP17` (UART0 RX)
+  - USB-TTL `GND` -> Pico 2 `GND`
+
+#### Build/flash/monitor
+
+```bash
+make build-hil                 # disables IMU + VL53 nodes
+make flash-stlink              # via OpenOCD + ST-Link
+make monitor-uart0             # default /dev/ttyUSB0 @115200
+```
+
+If your serial adapter uses a different port:
+
+```bash
+make monitor-uart0 UART0_PORT=/dev/ttyUSB1
+```
+
+If OpenOCD target/interface paths differ on your host:
+
+```bash
+make flash-stlink OPENOCD_IFACE=interface/stlink.cfg OPENOCD_TARGET=target/rp2350.cfg
+```
+
 ### Monitor serial console
 
 ```bash
@@ -150,8 +184,11 @@ make test-ztest             # Zephyr ztest on native_sim
 | `make setup` | Run `setup_zephyr.sh` (full environment setup) |
 | `make build` | Build firmware (UART console) |
 | `make build-usb` | Build firmware (USB console) |
+| `make build-hil` | Build for bare HIL (IMU/VL53 disabled) |
 | `make flash` | Copy UF2 to Pico 2 in BOOTSEL mode |
+| `make flash-stlink` | Flash ELF via ST-Link/OpenOCD |
 | `make monitor` | Serial console (picocom) |
+| `make monitor-uart0` | UART0 logs via USB-TTL (default `/dev/ttyUSB0`) |
 | `make test` | Run all tests |
 | `make test-host` | Host unit tests (gcc, no Zephyr) |
 | `make test-ztest` | Zephyr ztest (native_sim) |
