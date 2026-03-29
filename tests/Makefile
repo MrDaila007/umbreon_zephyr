@@ -20,9 +20,15 @@ test: test-host test-ztest
 test_unit: test_unit.c zephyr_stubs.h test_runner.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
-test-host: test_unit
+test_maneuver: test_maneuver.c test_runner.h
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test-host: test_unit test_maneuver
 	@echo "══ Host unit tests ══"
 	@./test_unit
+	@echo ""
+	@echo "══ Maneuver state machine tests ══"
+	@./test_maneuver
 
 # ── Zephyr ztest (native_sim) ────────────────────────────────────────────────
 test-ztest:
@@ -34,7 +40,7 @@ test-ztest:
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 clean:
-	rm -f test_unit
+	rm -f test_unit test_maneuver
 
 clean-ztest:
 	rm -rf $(ZTEST_BUILD)

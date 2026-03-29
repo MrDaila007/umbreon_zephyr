@@ -81,111 +81,193 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 			state, stuck, (double)trn, how_clr, dif);
 }
 
-/* ─── go_back() ───────────────────────────────────────────────────────────── */
-/* Port from Umbreon_roborace.ino:1060-1084 */
+/* ─── Maneuver state machine ─────────────────────────────────────────────── */
+/* Non-blocking replacement for go_back() and go_back_long().
+ * Called every loop_ms from work() — does not block the control loop.
+ *
+ * ESC brake-to-reverse protocol: RC ESCs treat the first reverse signal
+ * after forward motion as BRAKE.  Must send brake → neutral → reverse
+ * to engage actual reverse. */
 
 extern void wdt_feed_kick(void);
 
-/* Minimum reverse distance before checking front clearance (m) */
-#define REVERSE_MIN_DIST  0.13f
-/* Maximum reverse duration (ms) */
-#define REVERSE_TIMEOUT   1500
+#define REVERSE_MIN_DIST  0.13f   /* metres before checking front clear */
 
-static void go_back(void)
+enum mnv_phase {
+	MNV_NONE = 0,
+	/* stuck-escape (go_back) */
+	MNV_BACK_WAIT_STOP,
+	MNV_BACK_BRAKE,
+	MNV_BACK_NEUTRAL,
+	MNV_BACK_REVERSE,
+	/* wrong-direction (go_back_long) */
+	MNV_LONG_WAIT_STOP,
+	MNV_LONG_BRAKE,
+	MNV_LONG_NEUTRAL,
+	MNV_LONG_REVERSE,
+	MNV_LONG_FORWARD,
+};
+
+static enum mnv_phase mnv;
+static int64_t  mnv_deadline;
+static int      mnv_steer;
+static uint32_t mnv_start_count;
+static int      mnv_alt;
+
+/* ── Maneuver starters ──────────────────────────────────────────────────── */
+
+static void maneuver_start_back(void)
 {
-	/* 1. Read side sensors to decide escape direction */
-	int *s = sensors_poll_mask(MASK_SIDES);
-	int left_space  = s[IDX_LEFT];
-	int right_space = s[IDX_RIGHT];
+	int *s  = sensors_poll_mask(MASK_SIDES);
+	int left  = s[IDX_LEFT];
+	int right = s[IDX_RIGHT];
 
-	int escape_steer;
-	if (left_space > right_space + 50) {
-		escape_steer = -600;
-	} else if (right_space > left_space + 50) {
-		escape_steer = 600;
+	if (left > right + 50) {
+		mnv_steer = -600;
+	} else if (right > left + 50) {
+		mnv_steer = 600;
 	} else {
-		/* Sides equal — turn toward inside of race direction */
-		escape_steer = cfg.race_cw ? -600 : 600;
+		mnv_steer = cfg.race_cw ? -600 : 600;
 	}
 
-	send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
-
-	/* 2. Wait for wheels to stop */
+	send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
 	car_write_speed(0);
-	int64_t deadline = k_uptime_get() + 2000;
-	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		wdt_feed_kick();
-		k_msleep(10);
-	}
+	mnv_deadline = k_uptime_get() + 2000;
+	mnv = MNV_BACK_WAIT_STOP;
+	stuck_time = 0;
+}
 
-	/* 3. Reverse with sensor-guided steering */
-	car_write_steer(escape_steer);
-	uint32_t start_count = taho_get_count();
-	int alt = 0;
+static void maneuver_start_long(void)
+{
+	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
+	car_write_speed(0);
+	car_write_steer(cfg.race_cw ? 1000 : -1000);
+	mnv_deadline = k_uptime_get() + 2000;
+	mnv = MNV_LONG_WAIT_STOP;
+}
 
-	car_write_speed(-150);
-	deadline = k_uptime_get() + REVERSE_TIMEOUT;
+/* ── One tick of the maneuver state machine ─────────────────────────────── */
 
-	while (k_uptime_get() < deadline) {
-		wdt_feed_kick();
+static void maneuver_tick(void)
+{
+	int64_t now = k_uptime_get();
 
-		/* Poll sides + one front (alternate FL/FR each cycle) */
-		s = sensors_poll_mask(alt ? MASK_FRONT_R : MASK_FRONT_L);
-		alt = !alt;
+	switch (mnv) {
 
-		/* Distance traveled (encoder counts → meters) */
-		uint32_t delta = taho_get_count() - start_count;
+	/* ── stuck-escape phases ──────────────────────────────────────── */
+
+	case MNV_BACK_WAIT_STOP:
+		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
+			car_write_steer(mnv_steer);
+			car_write_speed(-150);
+			mnv_deadline = now + 500;
+			mnv = MNV_BACK_BRAKE;
+		}
+		break;
+
+	case MNV_BACK_BRAKE:
+		if (now >= mnv_deadline) {
+			car_write_speed(0);
+			mnv_deadline = now + 80;
+			mnv = MNV_BACK_NEUTRAL;
+		}
+		break;
+
+	case MNV_BACK_NEUTRAL:
+		if (now >= mnv_deadline) {
+			car_write_speed(-150);
+			mnv_start_count = taho_get_count();
+			mnv_alt = 0;
+			mnv_deadline = now + 2000;
+			mnv = MNV_BACK_REVERSE;
+		}
+		break;
+
+	case MNV_BACK_REVERSE: {
+		int *s = sensors_poll_mask(mnv_alt ? MASK_FRONT_R
+						   : MASK_FRONT_L);
+		mnv_alt = !mnv_alt;
+
+		uint32_t delta = taho_get_count() - mnv_start_count;
 		float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
 			     / (float)cfg.encoder_holes;
 
-		/* Front clear? (both FL and FR above threshold) */
 		bool front_clear =
 			s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
 			s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
 
-		if (front_clear && dist >= REVERSE_MIN_DIST) {
+		if ((front_clear && dist >= REVERSE_MIN_DIST) ||
+		    now >= mnv_deadline) {
+			car_write_speed(0);
+			car_write_steer(mnv_steer);
+			imu_reset_heading();
+			send_run_state(RUN_REVERSE, 0, turns, 0, mnv_steer);
+			mnv = MNV_NONE;
 			break;
 		}
 
-		/* Update escape direction from sides */
-		left_space  = s[IDX_LEFT];
-		right_space = s[IDX_RIGHT];
-		if (left_space > right_space + 100) {
-			escape_steer = -600;
-		} else if (right_space > left_space + 100) {
-			escape_steer = 600;
+		int left  = s[IDX_LEFT];
+		int right = s[IDX_RIGHT];
+		if (left > right + 100) {
+			mnv_steer = -600;
+		} else if (right > left + 100) {
+			mnv_steer = 600;
 		}
-		car_write_steer(escape_steer);
-
-		send_run_state(RUN_REVERSE, stuck_time, turns, 0, escape_steer);
-		k_msleep(10);
+		car_write_steer(mnv_steer);
+		send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
+		break;
 	}
 
-	car_write_speed(0);
-	/* Keep escape steering for the forward drive that follows */
-	car_write_steer(escape_steer);
-	send_run_state(RUN_REVERSE, 0, turns, 0, escape_steer);
-}
+	/* ── wrong-direction phases ───────────────────────────────────── */
 
-static void go_back_long(void)
-{
-	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
-	car_write_speed(0);
-	int64_t deadline = k_uptime_get() + 2000;
-	while (taho_get_speed() > 0.1f && k_uptime_get() < deadline) {
-		wdt_feed_kick();
-		k_msleep(10);
+	case MNV_LONG_WAIT_STOP:
+		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
+			car_write_speed(-150);
+			mnv_deadline = now + 1000;
+			mnv = MNV_LONG_BRAKE;
+		}
+		break;
+
+	case MNV_LONG_BRAKE:
+		if (now >= mnv_deadline) {
+			car_write_speed(0);
+			mnv_deadline = now + 80;
+			mnv = MNV_LONG_NEUTRAL;
+		}
+		break;
+
+	case MNV_LONG_NEUTRAL:
+		if (now >= mnv_deadline) {
+			car_write_speed(-150);
+			mnv_deadline = now + 1800;
+			mnv = MNV_LONG_REVERSE;
+		}
+		break;
+
+	case MNV_LONG_REVERSE:
+		if (now >= mnv_deadline) {
+			car_write_speed(0);
+			car_write_steer(cfg.race_cw ? -700 : 700);
+			car_write_speed_ms(2.0f);
+			mnv_deadline = now + 900;
+			mnv = MNV_LONG_FORWARD;
+		}
+		break;
+
+	case MNV_LONG_FORWARD:
+		car_pid_control();
+		if (now >= mnv_deadline) {
+			turns = 0.0f;
+			imu_reset_heading();
+			send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
+			mnv = MNV_NONE;
+		}
+		break;
+
+	default:
+		mnv = MNV_NONE;
+		break;
 	}
-	car_write_speed(-150);
-	k_msleep(1000);
-	wdt_feed_kick();
-	car_write_speed(0);
-	k_msleep(80);
-	car_write_speed(-150);
-	k_msleep(1800);
-	wdt_feed_kick();
-	car_write_speed(0);
-	send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
 }
 
 /* ─── Telemetry ───────────────────────────────────────────────────────────── */
@@ -216,6 +298,13 @@ static void send_idle_telemetry(void)
 
 static void work(void)
 {
+	/* Maneuver in progress — advance state machine, skip normal logic */
+	if (mnv != MNV_NONE) {
+		imu_update();
+		maneuver_tick();
+		return;
+	}
+
 	int *s = sensors_poll();
 	imu_update();
 
@@ -303,10 +392,8 @@ static void work(void)
 	}
 
 	if (stuck_time > cfg.stuck_thresh) {
-		go_back();
-		car_write_speed_ms(spd);
-		stuck_time = 0;
-		imu_reset_heading();
+		maneuver_start_back();
+		return;
 	}
 
 	/* ── Wrong-direction detection ─────────────────────────────────────── */
@@ -323,23 +410,8 @@ static void work(void)
 				      : (turns < -cfg.wrong_dir_deg);
 
 	if (wrong_way) {
-		car_write_speed(0);
-		k_msleep(100);
-		car_write_steer(cfg.race_cw ? 1000 : -1000);
-		k_msleep(20);
-		go_back_long();
-		car_write_steer(cfg.race_cw ? -700 : 700);
-		car_write_speed_ms(2.0f);
-
-		int64_t strt = k_uptime_get();
-		while ((k_uptime_get() - strt) < 900) {
-			sensors_poll();
-			imu_update();
-			car_pid_control();
-			k_msleep(10);
-		}
-		turns = 0.0f;
-		imu_reset_heading();
+		maneuver_start_long();
+		return;
 	}
 }
 
@@ -483,6 +555,7 @@ void control_cmd_start(void)
 	imu_reset_heading();
 	stuck_time = 0;
 	turns = 0.0f;
+	mnv = MNV_NONE;
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
 	wifi_cmd_send("$ACK\n");
@@ -515,6 +588,7 @@ bool control_is_monitor(void)
 
 void control_cmd_stop(void)
 {
+	mnv = MNV_NONE;
 	car_running = false;
 	monitor_mode = false;
 	display_notify_run_state(false);
