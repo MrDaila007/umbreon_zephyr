@@ -62,6 +62,9 @@ struct car_settings {
 	bool bat_enabled;
 	float bat_multiplier;
 	float bat_low;
+
+	/* Tachometer glitch reject threshold (µs) */
+	int tach_glitch_filter_us;
 };
 
 /* Global configuration instance */
@@ -91,3 +94,8 @@ void settings_init(void);
 bool settings_load(void);
 bool settings_save(void);
 void settings_reset(void);
+
+/* Thread-safe config access */
+void settings_lock(void);
+void settings_unlock(void);
+void settings_get_copy(struct car_settings *out);

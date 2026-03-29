@@ -17,3 +17,6 @@ uint32_t taho_time_since_last_us(void);
 
 /* Reset counters (for tests) */
 void taho_reset(void);
+
+/* Runtime update of ISR glitch filter threshold (µs) */
+void taho_set_glitch_filter_us(uint32_t us);

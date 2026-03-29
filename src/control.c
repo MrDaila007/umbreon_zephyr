@@ -43,6 +43,16 @@ static volatile int manual_steer;
 static volatile float manual_speed;
 static volatile int64_t last_drv_ms;
 
+enum control_start_state {
+	CTRL_START_IDLE = 0,
+	CTRL_START_COUNTDOWN,
+	CTRL_START_RUNNING,
+};
+
+static enum control_start_state start_state = CTRL_START_IDLE;
+static bool start_cancel_requested;
+static K_MUTEX_DEFINE(start_state_mutex);
+
 /* Stuck detection (persistent across work() calls) */
 static int stuck_time;
 static float turns;
@@ -118,6 +128,9 @@ static int      mnv_alt;
 
 static void maneuver_start_back(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	int *s  = sensors_poll_mask(MASK_SIDES);
 	int left  = s[IDX_LEFT];
 	int right = s[IDX_RIGHT];
@@ -127,7 +140,7 @@ static void maneuver_start_back(void)
 	} else if (right > left + 50) {
 		mnv_steer = 600;
 	} else {
-		mnv_steer = cfg.race_cw ? -600 : 600;
+		mnv_steer = c.race_cw ? -600 : 600;
 	}
 
 	send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
@@ -139,9 +152,12 @@ static void maneuver_start_back(void)
 
 static void maneuver_start_long(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
 	car_write_speed(0);
-	car_write_steer(cfg.race_cw ? 1000 : -1000);
+	car_write_steer(c.race_cw ? 1000 : -1000);
 	mnv_deadline = k_uptime_get() + 2000;
 	mnv = MNV_LONG_WAIT_STOP;
 }
@@ -150,6 +166,9 @@ static void maneuver_start_long(void)
 
 static void maneuver_tick(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	int64_t now = k_uptime_get();
 
 	switch (mnv) {
@@ -189,12 +208,12 @@ static void maneuver_tick(void)
 		mnv_alt = !mnv_alt;
 
 		uint32_t delta = taho_get_count() - mnv_start_count;
-		float dist = ((float)delta * (float)M_PI * cfg.wheel_diam_m)
-			     / (float)cfg.encoder_holes;
+		float dist = ((float)delta * (float)M_PI * c.wheel_diam_m)
+			     / (float)c.encoder_holes;
 
 		bool front_clear =
-			s[IDX_FRONT_LEFT]  > cfg.front_obstacle_dist &&
-			s[IDX_FRONT_RIGHT] > cfg.front_obstacle_dist;
+			s[IDX_FRONT_LEFT]  > c.front_obstacle_dist &&
+			s[IDX_FRONT_RIGHT] > c.front_obstacle_dist;
 
 		if ((front_clear && dist >= REVERSE_MIN_DIST) ||
 		    now >= mnv_deadline) {
@@ -247,7 +266,7 @@ static void maneuver_tick(void)
 	case MNV_LONG_REVERSE:
 		if (now >= mnv_deadline) {
 			car_write_speed(0);
-			car_write_steer(cfg.race_cw ? -700 : 700);
+			car_write_steer(c.race_cw ? -700 : 700);
 			car_write_speed_ms(2.0f);
 			mnv_deadline = now + 900;
 			mnv = MNV_LONG_FORWARD;
@@ -298,6 +317,9 @@ static void send_idle_telemetry(void)
 
 static void work(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	/* Maneuver in progress — advance state machine, skip normal logic */
 	if (mnv != MNV_NONE) {
 		imu_update();
@@ -310,10 +332,10 @@ static void work(void)
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
 	int diff;
-	bool f_l = s[IDX_FRONT_LEFT]  < cfg.front_obstacle_dist;
-	bool f_r = s[IDX_FRONT_RIGHT] < cfg.front_obstacle_dist;
+	bool f_l = s[IDX_FRONT_LEFT]  < c.front_obstacle_dist;
+	bool f_r = s[IDX_FRONT_RIGHT] < c.front_obstacle_dist;
 
-	if (s[IDX_LEFT] > cfg.side_open_dist && s[IDX_RIGHT] > cfg.side_open_dist) {
+	if (s[IDX_LEFT] > c.side_open_dist && s[IDX_RIGHT] > c.side_open_dist) {
 		diff = WALL_FOLLOW_BIAS;
 	} else {
 		diff = s[IDX_RIGHT] - s[IDX_LEFT];
@@ -322,7 +344,7 @@ static void work(void)
 	/* All sensors close: hard turn */
 	bool all_close = true;
 	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (s[i] >= cfg.all_close_dist) {
+		if (s[i] >= c.all_close_dist) {
 			all_close = false;
 			break;
 		}
@@ -339,11 +361,11 @@ static void work(void)
 	float coef, spd;
 
 	if (how_clear == 0) {
-		coef = cfg.coe_clear;
-		spd = cfg.spd_clear;
+		coef = c.coe_clear;
+		spd = c.spd_clear;
 	} else {
-		coef = cfg.coe_blocked;
-		spd = cfg.spd_blocked;
+		coef = c.coe_blocked;
+		spd = c.spd_blocked;
 	}
 
 	/* Track learning integration */
@@ -381,8 +403,8 @@ static void work(void)
 	}
 
 	/* ── Stuck detection ───────────────────────────────────────────────── */
-	bool c_fl = s[IDX_FRONT_LEFT]  < cfg.close_front_dist;
-	bool c_fr = s[IDX_FRONT_RIGHT] < cfg.close_front_dist;
+	bool c_fl = s[IDX_FRONT_LEFT]  < c.close_front_dist;
+	bool c_fr = s[IDX_FRONT_RIGHT] < c.close_front_dist;
 	bool low_speed = taho_get_speed() < 0.1f;
 
 	bool blocked = c_fl || c_fr;
@@ -393,23 +415,23 @@ static void work(void)
 		stuck_time = 0;
 	}
 
-	if (stuck_time > cfg.stuck_thresh) {
+	if (stuck_time > c.stuck_thresh) {
 		maneuver_start_back();
 		return;
 	}
 
 	/* ── Wrong-direction detection ─────────────────────────────────────── */
-	turns += imu_get_yaw_rate() * (cfg.loop_ms / 1000.0f);
-	if (cfg.race_cw && turns < 0.0f) {
+	turns += imu_get_yaw_rate() * (c.loop_ms / 1000.0f);
+	if (c.race_cw && turns < 0.0f) {
 		turns *= 0.97f;
 	}
-	if (!cfg.race_cw && turns > 0.0f) {
+	if (!c.race_cw && turns > 0.0f) {
 		turns *= 0.97f;
 	}
 	turns = CLAMP(turns, -200.0f, 200.0f);
 
-	bool wrong_way = cfg.race_cw ? (turns > cfg.wrong_dir_deg)
-				      : (turns < -cfg.wrong_dir_deg);
+	bool wrong_way = c.race_cw ? (turns > c.wrong_dir_deg)
+				   : (turns < -c.wrong_dir_deg);
 
 	if (wrong_way) {
 		maneuver_start_long();
@@ -421,13 +443,16 @@ static void work(void)
 
 static void work_monitor(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	int *s = sensors_poll();
 	imu_update();
 
 	/* ── Steering (same wall-follow logic as work()) ──────────────── */
 	int diff;
 
-	if (s[IDX_LEFT] > cfg.side_open_dist && s[IDX_RIGHT] > cfg.side_open_dist) {
+	if (s[IDX_LEFT] > c.side_open_dist && s[IDX_RIGHT] > c.side_open_dist) {
 		diff = WALL_FOLLOW_BIAS;
 	} else {
 		diff = s[IDX_RIGHT] - s[IDX_LEFT];
@@ -435,7 +460,7 @@ static void work_monitor(void)
 
 	bool all_close = true;
 	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (s[i] >= cfg.all_close_dist) {
+		if (s[i] >= c.all_close_dist) {
 			all_close = false;
 			break;
 		}
@@ -448,12 +473,30 @@ static void work_monitor(void)
 	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
 
 	/* Use clear coefficients for steering */
-	int steer_val = (int)(diff * cfg.coe_clear);
+	int steer_val = (int)(diff * c.coe_clear);
 	car_write_steer(steer_val);
 
 	/* No motor — no speed, no PID, no stuck/wrong-dir detection */
 
 	send_telemetry(s, steer_val, 0.0f);
+}
+
+static enum control_start_state get_start_state(void)
+{
+	enum control_start_state st;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	st = start_state;
+	k_mutex_unlock(&start_state_mutex);
+	return st;
+}
+
+static bool is_start_cancelled(void)
+{
+	bool cancelled;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	cancelled = (start_state != CTRL_START_COUNTDOWN) || start_cancel_requested;
+	k_mutex_unlock(&start_state_mutex);
+	return cancelled;
 }
 
 /* ─── Control thread ──────────────────────────────────────────────────────── */
@@ -464,7 +507,9 @@ static void control_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	LOG_INF("Control thread started (period=%d ms)", cfg.loop_ms);
+	struct car_settings c;
+	settings_get_copy(&c);
+	LOG_INF("Control thread started (period=%d ms)", c.loop_ms);
 
 	int64_t next_loop = k_uptime_get();
 
@@ -477,18 +522,24 @@ static void control_thread(void *p1, void *p2, void *p3)
 			k_msleep(next_loop - now);
 			now = k_uptime_get();
 		}
-		next_loop = (next_loop + cfg.loop_ms > now)
-			    ? next_loop + cfg.loop_ms
-			    : now + cfg.loop_ms;
+		settings_get_copy(&c);
+		next_loop = (next_loop + c.loop_ms > now)
+			    ? next_loop + c.loop_ms
+			    : now + c.loop_ms;
 
 		/* Manual drive active? */
 		bool drv_active = drv_enabled && manual_mode &&
 				  (k_uptime_get() - last_drv_ms < 500);
+		enum control_start_state st = get_start_state();
+		bool running = (st == CTRL_START_RUNNING);
+		bool countdown = (st == CTRL_START_COUNTDOWN);
 
-		if (monitor_mode && !car_running) {
+		if (countdown) {
+			/* Countdown owner sends idle telemetry to avoid double polling */
+		} else if (monitor_mode && !running) {
 			/* Diagnostic monitor mode */
 			work_monitor();
-		} else if (car_running && !drv_active) {
+		} else if (running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;
 			work();
@@ -507,13 +558,17 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 		/* Low-voltage safety cutoff */
 		static int64_t bat_low_since;
-		if (cfg.bat_enabled && battery_get_voltage() > 0.5f &&
-		    battery_get_voltage() < cfg.bat_low) {
+		if (c.bat_enabled && battery_get_voltage() > 0.5f &&
+		    battery_get_voltage() < c.bat_low) {
 			if (bat_low_since == 0) {
 				bat_low_since = now;
 			} else if (now - bat_low_since > 10000) {
-				if (car_running || drv_enabled) {
+				if (running || countdown || drv_enabled) {
+					k_mutex_lock(&start_state_mutex, K_FOREVER);
+					start_cancel_requested = true;
+					start_state = CTRL_START_IDLE;
 					car_running = false;
+					k_mutex_unlock(&start_state_mutex);
 					display_notify_run_state(false);
 					drv_enabled = false;
 					manual_mode = false;
@@ -548,11 +603,45 @@ void control_init(void)
 
 bool control_is_running(void)
 {
-	return car_running;
+	return get_start_state() == CTRL_START_RUNNING;
+}
+
+bool control_is_countdown(void)
+{
+	return get_start_state() == CTRL_START_COUNTDOWN;
+}
+
+bool control_request_start(void)
+{
+	bool accepted = false;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	if (start_state == CTRL_START_IDLE) {
+		start_state = CTRL_START_COUNTDOWN;
+		start_cancel_requested = false;
+		car_running = false;
+		accepted = true;
+	}
+	k_mutex_unlock(&start_state_mutex);
+	return accepted;
+}
+
+void control_cancel_start_request(void)
+{
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	if (start_state == CTRL_START_COUNTDOWN) {
+		start_cancel_requested = true;
+		start_state = CTRL_START_IDLE;
+		car_running = false;
+	}
+	k_mutex_unlock(&start_state_mutex);
 }
 
 void control_cmd_start(void)
 {
+	if (!control_is_countdown()) {
+		return;
+	}
+
 	car_pid_reset();
 	imu_reset_heading();
 	stuck_time = 0;
@@ -560,17 +649,33 @@ void control_cmd_start(void)
 	mnv = MNV_NONE;
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
-	wifi_cmd_send("$ACK\n");
 
 	/* 5-second countdown — idle telemetry flows */
 	int64_t start_at = k_uptime_get() + 5000;
 	while (k_uptime_get() < start_at) {
+		if (is_start_cancelled()) {
+			return;
+		}
 		wdt_feed_kick();
 		send_idle_telemetry();
-		k_msleep(cfg.loop_ms);
+		struct car_settings c;
+		settings_get_copy(&c);
+		k_msleep(c.loop_ms);
 	}
 
-	car_running = true;
+	bool entered_run = false;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	if (start_state == CTRL_START_COUNTDOWN && !start_cancel_requested) {
+		start_state = CTRL_START_RUNNING;
+		car_running = true;
+		entered_run = true;
+	}
+	k_mutex_unlock(&start_state_mutex);
+
+	if (!entered_run) {
+		return;
+	}
+
 	display_notify_run_state(true);
 	wifi_cmd_send("$STS:RUN\n");
 }
@@ -590,8 +695,13 @@ bool control_is_monitor(void)
 
 void control_cmd_stop(void)
 {
-	mnv = MNV_NONE;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
+	start_cancel_requested = true;
+	start_state = CTRL_START_IDLE;
 	car_running = false;
+	k_mutex_unlock(&start_state_mutex);
+
+	mnv = MNV_NONE;
 	monitor_mode = false;
 	display_notify_run_state(false);
 	drv_enabled = false;

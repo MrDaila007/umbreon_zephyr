@@ -28,6 +28,7 @@ static struct gpio_callback tach_cb_data;
 static atomic_t taho_count     = ATOMIC_INIT(0);
 static atomic_t taho_last_cyc  = ATOMIC_INIT(0);  /* raw HW cycles */
 static atomic_t taho_interval  = ATOMIC_INIT(0);   /* delta in µs */
+static atomic_t taho_glitch_filter_us = ATOMIC_INIT(35);
 
 /* ─── Cycle-domain helpers ────────────────────────────────────────────────── */
 /* Subtract in cycle domain (uint32_t wrap is correct), then convert to µs.
@@ -42,7 +43,16 @@ static inline uint32_t cyc_delta_us(uint32_t from_cyc, uint32_t to_cyc)
 
 /* Reject only narrow EMI glitches on the optical line — not valid slot edges.
  * 200 µs here falsely dropped real pulses (~15+ m/s with 68 holes on Ø65 mm ≈ 200 µs). */
-#define TAHO_GLITCH_FILTER_US  35
+static inline uint32_t clamp_glitch_filter_us(uint32_t us)
+{
+	if (us < 1U) {
+		return 1U;
+	}
+	if (us > 500U) {
+		return 500U;
+	}
+	return us;
+}
 
 /* ─── ISR ─────────────────────────────────────────────────────────────────── */
 /* Port of taho_interrupt() from luna_car.h:71-78 */
@@ -56,7 +66,8 @@ static void tach_isr(const struct device *dev, struct gpio_callback *cb, uint32_
 	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
 	uint32_t delta_us = cyc_delta_us(last_cyc, now_cyc);
 
-	if (delta_us < TAHO_GLITCH_FILTER_US) {
+	uint32_t glitch_filter_us = (uint32_t)atomic_get(&taho_glitch_filter_us);
+	if (delta_us < glitch_filter_us) {
 		return;
 	}
 
@@ -69,6 +80,11 @@ static void tach_isr(const struct device *dev, struct gpio_callback *cb, uint32_
 
 void taho_init(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+	atomic_set(&taho_glitch_filter_us, (atomic_val_t)clamp_glitch_filter_us(
+		(uint32_t)c.tach_glitch_filter_us));
+
 	if (!gpio_is_ready_dt(&tach_gpio)) {
 		LOG_ERR("Tachometer GPIO not ready");
 		return;
@@ -87,6 +103,9 @@ void taho_init(void)
 
 float taho_get_speed(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	uint32_t now_cyc = k_cycle_get_32();
 	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
 	uint32_t iv = (uint32_t)atomic_get(&taho_interval);
@@ -96,12 +115,12 @@ float taho_get_speed(void)
 		elapsed = iv;
 	}
 
-	if (iv == 0 || elapsed > 500000 || cfg.encoder_holes <= 0) {
+	if (iv == 0 || elapsed > 500000 || c.encoder_holes <= 0) {
 		return 0.0f;
 	}
 
-	return ((float)M_PI * cfg.wheel_diam_m) /
-	       ((float)cfg.encoder_holes * ((float)elapsed / 1e6f));
+	return ((float)M_PI * c.wheel_diam_m) /
+	       ((float)c.encoder_holes * ((float)elapsed / 1e6f));
 }
 
 uint32_t taho_get_count(void)
@@ -121,4 +140,9 @@ void taho_reset(void)
 	atomic_set(&taho_count, 0);
 	atomic_set(&taho_last_cyc, (atomic_val_t)k_cycle_get_32());
 	atomic_set(&taho_interval, 0);
+}
+
+void taho_set_glitch_filter_us(uint32_t us)
+{
+	atomic_set(&taho_glitch_filter_us, (atomic_val_t)clamp_glitch_filter_us(us));
 }

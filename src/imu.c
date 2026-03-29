@@ -107,6 +107,9 @@ void imu_calibrate(void)
 
 void imu_update(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	if (!mpu_ok) {
 		return;
 	}
@@ -125,7 +128,7 @@ void imu_update(void)
 	/* Convert rad/s → °/s, subtract bias */
 	float raw_rate = sensor_value_to_float(&val) * (180.0f / (float)M_PI) - gyro_bias;
 
-	if (cfg.imu_rotate) {
+	if (c.imu_rotate) {
 		raw_rate = -raw_rate;
 	}
 

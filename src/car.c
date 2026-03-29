@@ -78,16 +78,19 @@ void car_init(void)
 
 void car_write_steer(int s)
 {
-	if (cfg.servo_reverse) {
+	struct car_settings c;
+	settings_get_copy(&c);
+
+	if (c.servo_reverse) {
 		s = -s;
 	}
 	s = CLAMP(s, -1000, 1000);
 
 	int angle;
 	if (s < 0) {
-		angle = map_val(s, -1000, 0, cfg.min_point, cfg.neutral_point);
+		angle = map_val(s, -1000, 0, c.min_point, c.neutral_point);
 	} else {
-		angle = map_val(s, 0, 1000, cfg.neutral_point, cfg.max_point);
+		angle = map_val(s, 0, 1000, c.neutral_point, c.max_point);
 	}
 
 	/* Convert angle (0–180°) to pulse width (700–2300 µs) */
@@ -113,15 +116,18 @@ void car_write_esc_us(int us)
 /* Port of Car::write_speed() from luna_car.h:396-405 */
 void car_write_speed(int s)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	/* Reset PID state — direct control bypasses PID */
 	car_pid_reset();
 
 	s = CLAMP(s, -1000, 1000);
 	int us;
 	if (s > 0) {
-		us = map_val(s, 1, 1000, cfg.min_speed, cfg.max_speed);
+		us = map_val(s, 1, 1000, c.min_speed, c.max_speed);
 	} else if (s < 0) {
-		us = map_val(s, -1000, -1, 1000, cfg.min_bspeed);
+		us = map_val(s, -1000, -1, 1000, c.min_bspeed);
 	} else {
 		us = NEUTRAL_SPEED;
 	}
@@ -151,6 +157,9 @@ void car_pid_reset(void)
 
 void car_pid_control(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	int64_t now_ms = k_uptime_get();
 	if (pid_prev_ms == 0) {
 		pid_prev_ms = now_ms;
@@ -169,9 +178,9 @@ void car_pid_control(void)
 	pid_prev_cnt = cnt;
 
 	float raw_speed = 0.0f;
-	if (cfg.encoder_holes > 0) {
-		raw_speed = (delta_cnt / (float)cfg.encoder_holes) *
-			    ((float)M_PI * cfg.wheel_diam_m) / dt;
+	if (c.encoder_holes > 0) {
+		raw_speed = (delta_cnt / (float)c.encoder_holes) *
+			    ((float)M_PI * c.wheel_diam_m) / dt;
 	}
 
 	/* EMA filter (0.7 = responsive, 0.3 = smooth) */
@@ -181,8 +190,8 @@ void car_pid_control(void)
 	}
 
 	/* Slew-limit setpoint (m/s²) — smooth start / mode transitions */
-	if (cfg.spd_slew > 0.001f) {
-		float step = cfg.spd_slew * dt;
+	if (c.spd_slew > 0.001f) {
+		float step = c.spd_slew * dt;
 		if (target_speed > pid_ref_applied + step) {
 			pid_ref_applied += step;
 		} else if (target_speed < pid_ref_applied - step) {
@@ -199,9 +208,9 @@ void car_pid_control(void)
 	bool had_fwd = kick_prev_pid_ref > 0.02f;
 	if (!want_fwd) {
 		kick_until_ms = 0;
-	} else if (!had_fwd && pid_filtered < 0.10f && cfg.kick_pct > 0.05f &&
-		   cfg.kick_ms > 0) {
-		kick_until_ms = now_ms + cfg.kick_ms;
+	} else if (!had_fwd && pid_filtered < 0.10f && c.kick_pct > 0.05f &&
+		   c.kick_ms > 0) {
+		kick_until_ms = now_ms + c.kick_ms;
 	}
 	if (want_fwd && pid_ref_applied > 0.05f &&
 	    pid_filtered >= pid_ref_applied * 0.78f) {
@@ -217,23 +226,23 @@ void car_pid_control(void)
 	pid_prev_filtered = pid_filtered;
 
 	/* Feedforward: jump past motor dead zone (follows slewed setpoint) */
-	float ff = (pid_ref_applied > 0.01f) ? (float)(cfg.min_speed - NEUTRAL_SPEED) : 0;
-	float output = ff + cfg.pid_kp * error + cfg.pid_ki * pid_integral + cfg.pid_kd * deriv;
+	float ff = (pid_ref_applied > 0.01f) ? (float)(c.min_speed - NEUTRAL_SPEED) : 0;
+	float output = ff + c.pid_kp * error + c.pid_ki * pid_integral + c.pid_kd * deriv;
 
 	float kick_us = 0.0f;
-	if (cfg.kick_pct > 0.05f && want_fwd && now_ms < kick_until_ms) {
-		int span = cfg.max_speed - cfg.min_speed;
+	if (c.kick_pct > 0.05f && want_fwd && now_ms < kick_until_ms) {
+		int span = c.max_speed - c.min_speed;
 		if (span < 1) {
 			span = 1;
 		}
-		kick_us = (cfg.kick_pct / 100.0f) * (float)span;
+		kick_us = (c.kick_pct / 100.0f) * (float)span;
 		if (kick_us > 40.0f) {
 			kick_us = 40.0f;
 		}
 	}
 
 	int esc_val = NEUTRAL_SPEED + (int)(output + kick_us);
-	esc_val = CLAMP(esc_val, NEUTRAL_SPEED, cfg.max_speed);
+	esc_val = CLAMP(esc_val, NEUTRAL_SPEED, c.max_speed);
 	esc_set_us(esc_val);
 }
 
@@ -263,7 +272,9 @@ void car_run_calibration(void)
 	k_msleep(1000);
 	wdt_feed_kick();
 
+	settings_lock();
 	cfg.calibrated = true;
+	settings_unlock();
 	settings_save();
 
 	wifi_cmd_send("$T:CAL,phase=done\n");

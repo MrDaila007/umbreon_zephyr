@@ -64,9 +64,12 @@ extern struct nvs_fs *settings_get_nvs(void);
 
 static float trk_get_odo_m(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	uint32_t counts = taho_get_count() - trk_taho_start;
-	if (cfg.encoder_holes <= 0) return 0.0f;
-	return (counts * (float)M_PI * cfg.wheel_diam_m) / (float)cfg.encoder_holes;
+	if (c.encoder_holes <= 0) return 0.0f;
+	return (counts * (float)M_PI * c.wheel_diam_m) / (float)c.encoder_holes;
 }
 
 /* ─── Checksum ────────────────────────────────────────────────────────────── */

@@ -62,6 +62,7 @@ struct car_settings {
 	bool bat_enabled;
 	float bat_multiplier;
 	float bat_low;
+	int tach_glitch_filter_us;
 };
 
 static struct car_settings cfg;
@@ -115,6 +116,7 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "BEN")  == 0) cfg.bat_enabled         = atoi(val) != 0;
 	else if (strcmp(key, "BML")  == 0) cfg.bat_multiplier      = strtof(val, NULL);
 	else if (strcmp(key, "BLV")  == 0) cfg.bat_low             = strtof(val, NULL);
+	else if (strcmp(key, "TGF")  == 0) cfg.tach_glitch_filter_us = CLAMP(atoi(val), 1, 500);
 	else return false;
 
 	return true;
@@ -128,6 +130,18 @@ static float speed_formula(float wheel_diam_m, int encoder_holes, uint32_t elaps
 	}
 	return ((float)M_PI * wheel_diam_m) /
 	       ((float)encoder_holes * ((float)elapsed_us / 1e6f));
+}
+
+/* From tachometer.c: clamp + ISR threshold check */
+static bool tach_pulse_is_valid(uint32_t delta_us, uint32_t filter_us)
+{
+	if (filter_us < 1U) {
+		filter_us = 1U;
+	}
+	if (filter_us > 500U) {
+		filter_us = 500U;
+	}
+	return delta_us >= filter_us;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -340,6 +354,27 @@ TEST(test_parse_normal_values)
 	ASSERT_FLOAT_EQ(cfg.wheel_diam_m, 0.065f, 0.001f);
 }
 
+TEST(test_parse_tgf_normal)
+{
+	memset(&cfg, 0, sizeof(cfg));
+	ASSERT_TRUE(parse_set_pair("TGF=35"));
+	ASSERT_EQ(cfg.tach_glitch_filter_us, 35);
+}
+
+TEST(test_parse_tgf_clamp_low)
+{
+	memset(&cfg, 0, sizeof(cfg));
+	ASSERT_TRUE(parse_set_pair("TGF=0"));
+	ASSERT_EQ(cfg.tach_glitch_filter_us, 1);
+}
+
+TEST(test_parse_tgf_clamp_high)
+{
+	memset(&cfg, 0, sizeof(cfg));
+	ASSERT_TRUE(parse_set_pair("TGF=999"));
+	ASSERT_EQ(cfg.tach_glitch_filter_us, 500);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Tests: speed_formula (taho_get_speed core math)
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -390,6 +425,128 @@ TEST(test_speed_very_slow)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: tach pulse glitch filter
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_tach_filter_rejects_below_threshold)
+{
+	ASSERT_FALSE(tach_pulse_is_valid(34, 35));
+}
+
+TEST(test_tach_filter_accepts_at_threshold)
+{
+	ASSERT_TRUE(tach_pulse_is_valid(35, 35));
+}
+
+TEST(test_tach_filter_accepts_above_threshold)
+{
+	ASSERT_TRUE(tach_pulse_is_valid(60, 35));
+}
+
+TEST(test_tach_filter_clamp_low)
+{
+	ASSERT_FALSE(tach_pulse_is_valid(0, 0));
+	ASSERT_TRUE(tach_pulse_is_valid(1, 0));
+}
+
+TEST(test_tach_filter_clamp_high)
+{
+	ASSERT_FALSE(tach_pulse_is_valid(499, 999));
+	ASSERT_TRUE(tach_pulse_is_valid(500, 999));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: RUN start-state machine invariants
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+enum control_start_state {
+	CTRL_START_IDLE = 0,
+	CTRL_START_COUNTDOWN,
+	CTRL_START_RUNNING,
+};
+
+struct control_start_ctx {
+	enum control_start_state start_state;
+	bool start_cancel_requested;
+	bool car_running;
+};
+
+static bool control_request_start_mock(struct control_start_ctx *ctx)
+{
+	if (ctx->start_state != CTRL_START_IDLE) {
+		return false;
+	}
+	ctx->start_state = CTRL_START_COUNTDOWN;
+	ctx->start_cancel_requested = false;
+	ctx->car_running = false;
+	return true;
+}
+
+static void control_cancel_start_request_mock(struct control_start_ctx *ctx)
+{
+	if (ctx->start_state == CTRL_START_COUNTDOWN) {
+		ctx->start_cancel_requested = true;
+		ctx->start_state = CTRL_START_IDLE;
+		ctx->car_running = false;
+	}
+}
+
+static bool control_finalize_countdown_mock(struct control_start_ctx *ctx)
+{
+	if (ctx->start_state == CTRL_START_COUNTDOWN &&
+	    !ctx->start_cancel_requested) {
+		ctx->start_state = CTRL_START_RUNNING;
+		ctx->car_running = true;
+		return true;
+	}
+	return false;
+}
+
+static bool control_thread_should_send_idle_mock(enum control_start_state st,
+						 bool monitor_mode,
+						 bool drv_active)
+{
+	if (st == CTRL_START_COUNTDOWN) {
+		return false; /* countdown owner is control_cmd_start() */
+	}
+	if (monitor_mode && st != CTRL_START_RUNNING) {
+		return false;
+	}
+	if (st == CTRL_START_RUNNING && !drv_active) {
+		return false;
+	}
+	if (drv_active) {
+		return false;
+	}
+	return true;
+}
+
+TEST(test_start_stop_race_cancel_wins)
+{
+	struct control_start_ctx c = {0};
+	ASSERT_TRUE(control_request_start_mock(&c));
+	ASSERT_EQ(c.start_state, CTRL_START_COUNTDOWN);
+	control_cancel_start_request_mock(&c);
+	ASSERT_FALSE(control_finalize_countdown_mock(&c));
+	ASSERT_EQ(c.start_state, CTRL_START_IDLE);
+	ASSERT_FALSE(c.car_running);
+}
+
+TEST(test_start_dedup_rejects_second_start)
+{
+	struct control_start_ctx c = {0};
+	ASSERT_TRUE(control_request_start_mock(&c));
+	ASSERT_FALSE(control_request_start_mock(&c));
+	ASSERT_EQ(c.start_state, CTRL_START_COUNTDOWN);
+}
+
+TEST(test_countdown_disables_idle_path)
+{
+	ASSERT_FALSE(control_thread_should_send_idle_mock(CTRL_START_COUNTDOWN, false, false));
+	ASSERT_TRUE(control_thread_should_send_idle_mock(CTRL_START_IDLE, false, false));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Main
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -430,6 +587,9 @@ int main(void)
 	RUN_TEST(test_parse_clamp_esc_range);
 	RUN_TEST(test_parse_clamp_servo_range);
 	RUN_TEST(test_parse_normal_values);
+	RUN_TEST(test_parse_tgf_normal);
+	RUN_TEST(test_parse_tgf_clamp_low);
+	RUN_TEST(test_parse_tgf_clamp_high);
 
 	printf("\n[speed_formula]\n");
 	RUN_TEST(test_speed_stationary);
@@ -439,6 +599,18 @@ int main(void)
 	RUN_TEST(test_speed_known_value);
 	RUN_TEST(test_speed_fast);
 	RUN_TEST(test_speed_very_slow);
+
+	printf("\n[tach_filter]\n");
+	RUN_TEST(test_tach_filter_rejects_below_threshold);
+	RUN_TEST(test_tach_filter_accepts_at_threshold);
+	RUN_TEST(test_tach_filter_accepts_above_threshold);
+	RUN_TEST(test_tach_filter_clamp_low);
+	RUN_TEST(test_tach_filter_clamp_high);
+
+	printf("\n[run_start_state]\n");
+	RUN_TEST(test_start_stop_race_cancel_wins);
+	RUN_TEST(test_start_dedup_rejects_second_start);
+	RUN_TEST(test_countdown_disables_idle_path);
 
 	TEST_SUMMARY();
 }

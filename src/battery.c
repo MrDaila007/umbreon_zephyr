@@ -62,7 +62,10 @@ static void battery_thread(void *p1, void *p2, void *p3)
 	while (1) {
 		k_msleep(500);
 
-		if (!cfg.bat_enabled || !adc_dev) {
+		struct car_settings c;
+		settings_get_copy(&c);
+
+		if (!c.bat_enabled || !adc_dev) {
 			continue;
 		}
 
@@ -72,7 +75,7 @@ static void battery_thread(void *p1, void *p2, void *p3)
 		}
 
 		float v_adc = (float)sample_buf * (3.3f / 4095.0f);
-		float v_bat = v_adc * cfg.bat_multiplier;
+		float v_bat = v_adc * c.bat_multiplier;
 
 		/* EMA filter */
 		if (bat_voltage < 0.1f) {

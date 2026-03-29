@@ -68,6 +68,67 @@ static volatile bool log_on;
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
+/* ─── Async command worker (long-running commands) ──────────────────────── */
+#define WIFI_ASYNC_STACK_SIZE 3072
+#define WIFI_ASYNC_PRIORITY   6
+static K_THREAD_STACK_DEFINE(wifi_async_stack, WIFI_ASYNC_STACK_SIZE);
+static struct k_thread wifi_async_thread_data;
+
+enum async_cmd_kind {
+	ASYNC_CMD_START = 1,
+	ASYNC_CMD_TEST  = 2,
+};
+
+struct async_cmd_msg {
+	uint8_t kind;
+	char arg[24];
+};
+
+K_MSGQ_DEFINE(async_cmd_q, sizeof(struct async_cmd_msg), 8, 4);
+
+static bool queue_async_start(void)
+{
+	struct async_cmd_msg msg = {
+		.kind = ASYNC_CMD_START,
+		.arg = { 0 },
+	};
+	return k_msgq_put(&async_cmd_q, &msg, K_NO_WAIT) == 0;
+}
+
+static bool queue_async_test(const char *name)
+{
+	struct async_cmd_msg msg = {
+		.kind = ASYNC_CMD_TEST,
+		.arg = { 0 },
+	};
+	strncpy(msg.arg, name, sizeof(msg.arg) - 1);
+	msg.arg[sizeof(msg.arg) - 1] = '\0';
+	return k_msgq_put(&async_cmd_q, &msg, K_NO_WAIT) == 0;
+}
+
+static void wifi_async_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	while (1) {
+		struct async_cmd_msg msg;
+		k_msgq_get(&async_cmd_q, &msg, K_FOREVER);
+
+		switch (msg.kind) {
+		case ASYNC_CMD_START:
+			control_cmd_start();
+			break;
+		case ASYNC_CMD_TEST:
+			tests_run_by_name(msg.arg);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 /* ─── Async TX helpers ────────────────────────────────────────────────────── */
 
 static inline uint16_t tx_free(void)
@@ -254,6 +315,7 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "BEN")  == 0) cfg.bat_enabled         = atoi(val) != 0;
 	else if (strcmp(key, "BML")  == 0) cfg.bat_multiplier      = strtof(val, NULL);
 	else if (strcmp(key, "BLV")  == 0) cfg.bat_low             = strtof(val, NULL);
+	else if (strcmp(key, "TGF")  == 0) cfg.tach_glitch_filter_us = CLAMP(atoi(val), 1, 500);
 	else return false;
 
 	return true;
@@ -263,6 +325,9 @@ static bool parse_set_pair(const char *pair)
 
 static void cmd_get(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	wifi_cmd_printf(
 		"$CFG:FOD=%d,SOD=%d,ACD=%d,CFD=%d"
 		",KP=%.4f,KI=%.4f,KD=%.4f"
@@ -273,22 +338,23 @@ static void cmd_get(void)
 		",WDD=%.1f,RCW=%d,STK=%d"
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
+		",TGF=%d"
 		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
-		cfg.front_obstacle_dist, cfg.side_open_dist,
-		cfg.all_close_dist, cfg.close_front_dist,
-		(double)cfg.pid_kp, (double)cfg.pid_ki, (double)cfg.pid_kd,
-		cfg.min_speed, cfg.max_speed, cfg.min_bspeed,
-		cfg.min_point, cfg.max_point, cfg.neutral_point,
-		cfg.encoder_holes, (double)cfg.wheel_diam_m, cfg.loop_ms,
-		(double)cfg.spd_clear, (double)cfg.spd_blocked,
-		(double)cfg.spd_slew,
-		(double)cfg.kick_pct, cfg.kick_ms,
-		(double)cfg.coe_clear, (double)cfg.coe_blocked,
-		(double)cfg.wrong_dir_deg, cfg.race_cw ? 1 : 0, cfg.stuck_thresh,
-		cfg.imu_rotate ? 1 : 0, cfg.servo_reverse ? 1 : 0,
-		cfg.calibrated ? 1 : 0,
-		cfg.bat_enabled ? 1 : 0, (double)cfg.bat_multiplier,
-		(double)cfg.bat_low,
+		c.front_obstacle_dist, c.side_open_dist,
+		c.all_close_dist, c.close_front_dist,
+		(double)c.pid_kp, (double)c.pid_ki, (double)c.pid_kd,
+		c.min_speed, c.max_speed, c.min_bspeed,
+		c.min_point, c.max_point, c.neutral_point,
+		c.encoder_holes, (double)c.wheel_diam_m, c.loop_ms,
+		(double)c.spd_clear, (double)c.spd_blocked,
+		(double)c.spd_slew,
+		(double)c.kick_pct, c.kick_ms,
+		(double)c.coe_clear, (double)c.coe_blocked,
+		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0, c.stuck_thresh,
+		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
+		c.calibrated ? 1 : 0,
+		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
+		(double)c.bat_low, c.tach_glitch_filter_us,
 		SENSOR_COUNT, MAX_SENSOR_RANGE);
 }
 
@@ -300,14 +366,19 @@ static void cmd_set(const char *args)
 	strncpy(buf, args, sizeof(buf) - 1);
 	buf[sizeof(buf) - 1] = '\0';
 
+	settings_lock();
 	char *token = strtok(buf, ",");
 	while (token) {
 		if (!parse_set_pair(token)) {
+			settings_unlock();
 			wifi_cmd_printf("$NAK:%s\n", token);
 			return;
 		}
 		token = strtok(NULL, ",");
 	}
+	int glitch_us = cfg.tach_glitch_filter_us;
+	settings_unlock();
+	taho_set_glitch_filter_us((uint32_t)glitch_us);
 	wifi_cmd_send("$ACK\n");
 }
 
@@ -364,10 +435,13 @@ static void cmd_imu(void)
 
 static void cmd_pid(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	wifi_cmd_printf("$PID:KP=%.4f,KI=%.4f,KD=%.4f"
 			",SPD=%.2f,TAHO=%u,TSPD=%.2f\n",
-			(double)cfg.pid_kp, (double)cfg.pid_ki,
-			(double)cfg.pid_kd,
+			(double)c.pid_kp, (double)c.pid_ki,
+			(double)c.pid_kd,
 			(double)taho_get_speed(),
 			taho_get_count(),
 			(double)taho_get_speed());
@@ -375,13 +449,16 @@ static void cmd_pid(void)
 
 static void cmd_sys(void)
 {
+	struct car_settings c;
+	settings_get_copy(&c);
+
 	wifi_cmd_printf("$SYS:UP=%lld,BAT=%.2f"
 			",MNP=%d,XNP=%d,NTP=%d"
 			",LOOP=%d,SNS=%d\n",
 			k_uptime_get(),
 			(double)battery_get_voltage(),
-			cfg.min_point, cfg.max_point, cfg.neutral_point,
-			cfg.loop_ms,
+			c.min_point, c.max_point, c.neutral_point,
+			c.loop_ms,
 			sensors_online_count());
 }
 
@@ -416,15 +493,29 @@ static void dispatch_command(const char *line)
 		wifi_cmd_send("$ACK\n");
 	} else if (strcmp(line, "$LOAD") == 0) {
 		if (settings_load()) {
+			struct car_settings c;
+			settings_get_copy(&c);
+			taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
 			wifi_cmd_send("$ACK\n");
 		} else {
 			wifi_cmd_send("$NAK:no_saved_config\n");
 		}
 	} else if (strcmp(line, "$RST") == 0) {
 		settings_reset();
+		struct car_settings c;
+		settings_get_copy(&c);
+		taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
 		wifi_cmd_send("$ACK\n");
 	} else if (strcmp(line, "$START") == 0) {
-		control_cmd_start();
+		if (!control_request_start()) {
+			wifi_cmd_send(control_is_running() ? "$NAK:already_running\n"
+						 : "$NAK:already_starting\n");
+		} else if (!queue_async_start()) {
+			control_cancel_start_request();
+			wifi_cmd_send("$NAK:busy\n");
+		} else {
+			wifi_cmd_send("$ACK\n");
+		}
 	} else if (strcmp(line, "$STOP") == 0) {
 		control_cmd_stop();
 	} else if (strcmp(line, "$MONITOR") == 0) {
@@ -432,11 +523,14 @@ static void dispatch_command(const char *line)
 	} else if (strcmp(line, "$STATUS") == 0) {
 		wifi_cmd_printf("$STS:%s\n",
 			control_is_running() ? "RUN" :
+			control_is_countdown() ? "STARTING" :
 			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
 	} else if (strncmp(line, "$TEST:", 6) == 0) {
-		tests_run_by_name(line + 6);
+		if (!queue_async_test(line + 6)) {
+			wifi_cmd_send("$NAK:busy\n");
+		}
 	} else if (strncmp(line, "$DRV:", 5) == 0) {
 		cmd_drv(line + 5);
 	} else if (strncmp(line, "$SRV:", 5) == 0) {
@@ -530,18 +624,44 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 		uint8_t mcmd;
 		while (k_msgq_get(&menu_cmd_q, &mcmd, K_NO_WAIT) == 0) {
 			switch (mcmd) {
-			case MCMD_START: control_cmd_start(); break;
+			case MCMD_START:
+				if (!control_request_start()) {
+					wifi_cmd_send(control_is_running() ? "$NAK:already_running\n"
+								 : "$NAK:already_starting\n");
+				} else if (!queue_async_start()) {
+					control_cancel_start_request();
+					wifi_cmd_send("$NAK:busy\n");
+				} else {
+					wifi_cmd_send("$ACK\n");
+				}
+				break;
 			case MCMD_STOP:  control_cmd_stop();  break;
 			case MCMD_SAVE:  settings_save(); wifi_cmd_send("$ACK\n"); break;
-			case MCMD_LOAD:  settings_load(); wifi_cmd_send("$ACK\n"); break;
-			case MCMD_RESET: settings_reset(); wifi_cmd_send("$ACK\n"); break;
+			case MCMD_LOAD: {
+				settings_load();
+				struct car_settings c;
+				settings_get_copy(&c);
+				taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+				wifi_cmd_send("$ACK\n");
+				break;
+			}
+			case MCMD_RESET: {
+				settings_reset();
+				struct car_settings c;
+				settings_get_copy(&c);
+				taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+				wifi_cmd_send("$ACK\n");
+				break;
+			}
 			default:
 				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
 					static const char *test_names[] = {
 						"lidar", "servo", "taho", "esc",
 						"speed", "autotune", "reactive", "cal",
 					};
-					tests_run_by_name(test_names[mcmd - MCMD_TEST_BASE]);
+					if (!queue_async_test(test_names[mcmd - MCMD_TEST_BASE])) {
+						wifi_cmd_send("$NAK:busy\n");
+					}
 				}
 				break;
 			}
@@ -567,6 +687,12 @@ void wifi_cmd_init(void)
 			wifi_cmd_thread, NULL, NULL, NULL,
 			WIFI_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_thread_data, "wifi_cmd");
+
+	k_thread_create(&wifi_async_thread_data, wifi_async_stack,
+			K_THREAD_STACK_SIZEOF(wifi_async_stack),
+			wifi_async_thread, NULL, NULL, NULL,
+			WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
+	k_thread_name_set(&wifi_async_thread_data, "wifi_async");
 
 	LOG_INF("WiFi CMD init (UART1 GP4/GP5, 115200)");
 }
