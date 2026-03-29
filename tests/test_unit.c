@@ -540,6 +540,25 @@ TEST(test_start_dedup_rejects_second_start)
 	ASSERT_EQ(c.start_state, CTRL_START_COUNTDOWN);
 }
 
+TEST(test_start_finalize_moves_to_running)
+{
+	struct control_start_ctx c = {0};
+	ASSERT_TRUE(control_request_start_mock(&c));
+	ASSERT_TRUE(control_finalize_countdown_mock(&c));
+	ASSERT_EQ(c.start_state, CTRL_START_RUNNING);
+	ASSERT_TRUE(c.car_running);
+}
+
+TEST(test_start_dedup_rejects_when_running)
+{
+	struct control_start_ctx c = {0};
+	ASSERT_TRUE(control_request_start_mock(&c));
+	ASSERT_TRUE(control_finalize_countdown_mock(&c));
+	ASSERT_FALSE(control_request_start_mock(&c));
+	ASSERT_EQ(c.start_state, CTRL_START_RUNNING);
+	ASSERT_TRUE(c.car_running);
+}
+
 TEST(test_countdown_disables_idle_path)
 {
 	ASSERT_FALSE(control_thread_should_send_idle_mock(CTRL_START_COUNTDOWN, false, false));
@@ -610,6 +629,8 @@ int main(void)
 	printf("\n[run_start_state]\n");
 	RUN_TEST(test_start_stop_race_cancel_wins);
 	RUN_TEST(test_start_dedup_rejects_second_start);
+	RUN_TEST(test_start_finalize_moves_to_running);
+	RUN_TEST(test_start_dedup_rejects_when_running);
 	RUN_TEST(test_countdown_disables_idle_path);
 
 	TEST_SUMMARY();
