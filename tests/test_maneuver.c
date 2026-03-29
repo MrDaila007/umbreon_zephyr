@@ -232,7 +232,7 @@ static void maneuver_tick(void)
 		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_steer(mnv_steer);
 			car_write_speed(-150);
-			mnv_deadline = now + 250;
+			mnv_deadline = now + 500;
 			mnv = MNV_BACK_BRAKE;
 		}
 		break;
@@ -250,7 +250,7 @@ static void maneuver_tick(void)
 			car_write_speed(-150);
 			mnv_start_count = taho_get_count();
 			mnv_alt = 0;
-			mnv_deadline = now + 1000;
+			mnv_deadline = now + 2000;
 			mnv = MNV_BACK_REVERSE;
 		}
 		break;
@@ -436,13 +436,13 @@ TEST(test_back_esc_full_sequence)
 	int brake_idx = speed_log_n - 1;
 	ASSERT_EQ(speed_log[brake_idx].val, -150);  /* 1st reverse = BRAKE */
 
-	/* Advance 250ms → transitions to NEUTRAL, sends 0 */
-	tick_at(1250);
+	/* Advance 500ms → transitions to NEUTRAL, sends 0 */
+	tick_at(1500);
 	ASSERT_EQ(mnv, MNV_BACK_NEUTRAL);
 	ASSERT_EQ(speed_log[speed_log_n - 1].val, 0);  /* neutral */
 
 	/* Advance 80ms → transitions to REVERSE, sends -150 */
-	tick_at(1330);
+	tick_at(1580);
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);
 	ASSERT_EQ(speed_log[speed_log_n - 1].val, -150);  /* 2nd = real reverse */
 
@@ -459,8 +459,8 @@ TEST(test_back_esc_signals_distinct_times)
 
 	maneuver_start_back();
 	tick_at(1000);   /* → BRAKE, speed=-150 */
-	tick_at(1250);   /* → NEUTRAL, speed=0 */
-	tick_at(1330);   /* → REVERSE, speed=-150 */
+	tick_at(1500);   /* → NEUTRAL, speed=0 */
+	tick_at(1580);   /* → REVERSE, speed=-150 */
 
 	/* Find the two -150 entries */
 	int first_rev = -1, second_rev = -1;
@@ -519,7 +519,7 @@ TEST(test_back_wait_stop_timeout)
 	ASSERT_EQ(mnv, MNV_BACK_BRAKE);  /* forced by timeout */
 }
 
-TEST(test_back_brake_duration_250ms)
+TEST(test_back_brake_duration_500ms)
 {
 	reset_all();
 	mock_taho_speed = 0.0f;
@@ -528,10 +528,10 @@ TEST(test_back_brake_duration_250ms)
 	tick_at(1000);  /* → BRAKE */
 	ASSERT_EQ(mnv, MNV_BACK_BRAKE);
 
-	tick_at(1200);  /* 200ms — too early */
+	tick_at(1400);  /* 400ms — too early */
 	ASSERT_EQ(mnv, MNV_BACK_BRAKE);
 
-	tick_at(1250);  /* 250ms — transition */
+	tick_at(1500);  /* 500ms — transition */
 	ASSERT_EQ(mnv, MNV_BACK_NEUTRAL);
 }
 
@@ -542,19 +542,19 @@ TEST(test_back_neutral_duration_80ms)
 
 	maneuver_start_back();
 	tick_at(1000);  /* → BRAKE */
-	tick_at(1250);  /* → NEUTRAL */
+	tick_at(1500);  /* → NEUTRAL */
 	ASSERT_EQ(mnv, MNV_BACK_NEUTRAL);
 
-	tick_at(1290);  /* 40ms — too early */
+	tick_at(1540);  /* 40ms — too early */
 	ASSERT_EQ(mnv, MNV_BACK_NEUTRAL);
 
-	tick_at(1330);  /* 80ms — transition */
+	tick_at(1580);  /* 80ms — transition */
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);
 }
 
-TEST(test_back_reverse_timeout_1s)
+TEST(test_back_reverse_timeout_2s)
 {
-	/* REVERSE phase should timeout after 1s if front never clears */
+	/* REVERSE phase should timeout after 2s if front never clears */
 	reset_all();
 	mock_taho_speed = 0.0f;
 	/* Front sensors blocked */
@@ -563,13 +563,13 @@ TEST(test_back_reverse_timeout_1s)
 
 	maneuver_start_back();
 	tick_at(1000);   /* → BRAKE */
-	tick_at(1250);   /* → NEUTRAL */
-	tick_at(1330);   /* → REVERSE, deadline = 1330 + 1000 = 2330 */
+	tick_at(1500);   /* → NEUTRAL */
+	tick_at(1580);   /* → REVERSE, deadline = 1580 + 2000 = 3580 */
 
-	tick_at(2300);
+	tick_at(3500);
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);  /* still going */
 
-	tick_at(2330);
+	tick_at(3580);
 	ASSERT_EQ(mnv, MNV_NONE);  /* timed out → done */
 }
 
@@ -585,8 +585,8 @@ TEST(test_back_reverse_early_exit_front_clear)
 
 	maneuver_start_back();
 	tick_at(1000);   /* → BRAKE */
-	tick_at(1250);   /* → NEUTRAL */
-	tick_at(1330);   /* → REVERSE, start_count = 0 */
+	tick_at(1500);   /* → NEUTRAL */
+	tick_at(1580);   /* → REVERSE, start_count = 0 */
 
 	/* Simulate: 50 encoder ticks (more than 0.13m) */
 	/* dist = 50 × π × 0.060 / 68 = 0.1385m > 0.13m */
@@ -594,7 +594,7 @@ TEST(test_back_reverse_early_exit_front_clear)
 	mock_sensors[IDX_FRONT_LEFT]  = 900;  /* > 800 = clear */
 	mock_sensors[IDX_FRONT_RIGHT] = 900;
 
-	tick_at(1370);
+	tick_at(1620);
 	ASSERT_EQ(mnv, MNV_NONE);  /* exited early */
 	ASSERT_EQ(imu_reset_calls, 1);
 }
@@ -607,15 +607,15 @@ TEST(test_back_reverse_no_exit_dist_short)
 
 	maneuver_start_back();
 	tick_at(1000);
-	tick_at(1250);
-	tick_at(1330);  /* → REVERSE */
+	tick_at(1500);
+	tick_at(1580);  /* → REVERSE */
 
 	/* Only 10 ticks: dist = 10 × π × 0.060 / 68 = 0.0277m < 0.13m */
 	mock_taho_count = 10;
 	mock_sensors[IDX_FRONT_LEFT]  = 900;
 	mock_sensors[IDX_FRONT_RIGHT] = 900;
 
-	tick_at(1370);
+	tick_at(1620);
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);  /* still reversing */
 }
 
@@ -627,14 +627,14 @@ TEST(test_back_reverse_no_exit_front_blocked)
 
 	maneuver_start_back();
 	tick_at(1000);
-	tick_at(1250);
-	tick_at(1330);  /* → REVERSE */
+	tick_at(1500);
+	tick_at(1580);  /* → REVERSE */
 
 	mock_taho_count = 50;
 	mock_sensors[IDX_FRONT_LEFT]  = 100;  /* < 800 = blocked */
 	mock_sensors[IDX_FRONT_RIGHT] = 900;
 
-	tick_at(1370);
+	tick_at(1620);
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);  /* still reversing */
 }
 
@@ -696,8 +696,8 @@ TEST(test_back_steer_updates_during_reverse)
 	ASSERT_EQ(mnv_steer, 600);
 
 	tick_at(1000);  /* → BRAKE */
-	tick_at(1250);  /* → NEUTRAL */
-	tick_at(1330);  /* → REVERSE */
+	tick_at(1500);  /* → NEUTRAL */
+	tick_at(1580);  /* → REVERSE */
 
 	/* Swap sides: now left is more open */
 	mock_sensors[IDX_LEFT]  = 600;
@@ -705,7 +705,7 @@ TEST(test_back_steer_updates_during_reverse)
 	mock_sensors[IDX_FRONT_LEFT]  = 100;  /* keep front blocked */
 	mock_sensors[IDX_FRONT_RIGHT] = 100;
 
-	tick_at(1370);
+	tick_at(1620);
 	ASSERT_EQ(mnv_steer, -600);  /* updated to left */
 }
 
@@ -888,18 +888,18 @@ TEST(test_back_completes_to_none)
 	tick_at(1000);
 	ASSERT_EQ(mnv, MNV_BACK_BRAKE);
 
-	/* BRAKE → NEUTRAL (250ms): 1040..1240 still BRAKE, 1250 triggers */
-	run_ticks(1040, 1240, 40);
+	/* BRAKE → NEUTRAL (500ms): 1040..1480 still BRAKE, 1500 triggers */
+	run_ticks(1040, 1480, 40);
 	ASSERT_EQ(mnv, MNV_BACK_BRAKE);
-	tick_at(1250);
+	tick_at(1500);
 	ASSERT_EQ(mnv, MNV_BACK_NEUTRAL);
 
 	/* NEUTRAL → REVERSE (80ms) */
-	run_ticks(1290, 1330, 40);
+	run_ticks(1540, 1580, 40);
 	ASSERT_EQ(mnv, MNV_BACK_REVERSE);
 
-	/* REVERSE → NONE (1000ms timeout since front blocked) */
-	run_ticks(1370, 2330, 40);
+	/* REVERSE → NONE (2000ms timeout since front blocked) */
+	run_ticks(1620, 3580, 40);
 	ASSERT_EQ(mnv, MNV_NONE);
 	ASSERT_TRUE(imu_reset_calls > 0);
 }
@@ -921,8 +921,8 @@ TEST(test_long_wait_stop_timeout)
 
 TEST(test_back_total_time_bounded)
 {
-	/* Worst case: wait_stop(2s) + brake(250ms) + neutral(80ms) + reverse(1s)
-	 * = 3330ms. Verify it finishes within that. */
+	/* Worst case: wait_stop(2s) + brake(500ms) + neutral(80ms) + reverse(2s)
+	 * = 4580ms. Verify it finishes within that. */
 	reset_all();
 	mock_taho_speed = 1.0f;  /* won't stop naturally */
 	mock_sensors[IDX_FRONT_LEFT]  = 100;
@@ -1034,9 +1034,9 @@ int main(void)
 	printf("\n[go_back timing]\n");
 	RUN_TEST(test_back_wait_stop_by_speed);
 	RUN_TEST(test_back_wait_stop_timeout);
-	RUN_TEST(test_back_brake_duration_250ms);
+	RUN_TEST(test_back_brake_duration_500ms);
 	RUN_TEST(test_back_neutral_duration_80ms);
-	RUN_TEST(test_back_reverse_timeout_1s);
+	RUN_TEST(test_back_reverse_timeout_2s);
 
 	printf("\n[go_back exit conditions]\n");
 	RUN_TEST(test_back_reverse_early_exit_front_clear);

@@ -160,7 +160,7 @@ static void maneuver_tick(void)
 		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_steer(mnv_steer);
 			car_write_speed(-150);
-			mnv_deadline = now + 250;
+			mnv_deadline = now + 500;
 			mnv = MNV_BACK_BRAKE;
 		}
 		break;
@@ -178,7 +178,7 @@ static void maneuver_tick(void)
 			car_write_speed(-150);
 			mnv_start_count = taho_get_count();
 			mnv_alt = 0;
-			mnv_deadline = now + 1000;
+			mnv_deadline = now + 2000;
 			mnv = MNV_BACK_REVERSE;
 		}
 		break;
