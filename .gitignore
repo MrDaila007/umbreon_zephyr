@@ -10,3 +10,4 @@ __pycache__/
 # Host test binaries
 tests/test_unit
 tests/test_maneuver
+tz_web_stall_param.md
