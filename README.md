@@ -163,6 +163,36 @@ If OpenOCD target/interface paths differ on your host:
 make flash-stlink OPENOCD_IFACE=interface/stlink.cfg OPENOCD_TARGET=target/rp2350.cfg
 ```
 
+### HIL transport without WiFi
+
+For HIL where RP2350 has no WiFi module:
+
+- `sim` is the data source / behavior model
+- `dashboard` is only visualization + command UI
+- `tools/hil_bridge.py` provides a unified TCP endpoint for dashboard
+
+Modes:
+
+- `real`: dashboard -> TCP -> bridge -> UART (`RP2350`)
+- `sim`: dashboard -> TCP -> bridge -> `sim.py --bridge`
+- `dual`: both endpoints in one process:
+  - real endpoint (default `127.0.0.1:8023`)
+  - sim endpoint  (default `127.0.0.1:8123`)
+
+Quick start:
+
+```bash
+make hil-deps
+make hil-real   HIL_SERIAL_PORT=/dev/ttyUSB0
+make hil-sim
+make hil-dual   HIL_SERIAL_PORT=/dev/ttyUSB0
+```
+
+Dashboard endpoint selection:
+
+- connect dashboard to `127.0.0.1:8023` for real stream
+- connect dashboard to `127.0.0.1:8123` for sim stream (or use second dashboard instance)
+
 ### Monitor serial console
 
 ```bash
@@ -193,6 +223,10 @@ make test-ztest             # Zephyr ztest on native_sim
 | `make test-host` | Host unit tests (gcc, no Zephyr) |
 | `make test-ztest` | Zephyr ztest (native_sim) |
 | `make clean` | Remove build artifacts |
+| `make hil-deps` | Install Python deps for HIL bridge (`pyserial`) |
+| `make hil-real` | Run bridge: dashboard <-> UART (RP2350) |
+| `make hil-sim` | Run sim + bridge endpoint for dashboard |
+| `make hil-dual` | Run real + sim endpoints in one bridge process |
 
 ## Architecture
 
