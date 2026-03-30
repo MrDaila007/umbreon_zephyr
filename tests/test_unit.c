@@ -468,7 +468,6 @@ enum control_start_state {
 struct control_start_ctx {
 	enum control_start_state start_state;
 	bool start_cancel_requested;
-	bool car_running;
 };
 
 static bool control_request_start_mock(struct control_start_ctx *ctx)
@@ -478,7 +477,6 @@ static bool control_request_start_mock(struct control_start_ctx *ctx)
 	}
 	ctx->start_state = CTRL_START_COUNTDOWN;
 	ctx->start_cancel_requested = false;
-	ctx->car_running = false;
 	return true;
 }
 
@@ -487,7 +485,6 @@ static void control_cancel_start_request_mock(struct control_start_ctx *ctx)
 	if (ctx->start_state == CTRL_START_COUNTDOWN) {
 		ctx->start_cancel_requested = true;
 		ctx->start_state = CTRL_START_IDLE;
-		ctx->car_running = false;
 	}
 }
 
@@ -496,7 +493,6 @@ static bool control_finalize_countdown_mock(struct control_start_ctx *ctx)
 	if (ctx->start_state == CTRL_START_COUNTDOWN &&
 	    !ctx->start_cancel_requested) {
 		ctx->start_state = CTRL_START_RUNNING;
-		ctx->car_running = true;
 		return true;
 	}
 	return false;
@@ -529,7 +525,6 @@ TEST(test_start_stop_race_cancel_wins)
 	control_cancel_start_request_mock(&c);
 	ASSERT_FALSE(control_finalize_countdown_mock(&c));
 	ASSERT_EQ(c.start_state, CTRL_START_IDLE);
-	ASSERT_FALSE(c.car_running);
 }
 
 TEST(test_start_dedup_rejects_second_start)
@@ -546,7 +541,6 @@ TEST(test_start_finalize_moves_to_running)
 	ASSERT_TRUE(control_request_start_mock(&c));
 	ASSERT_TRUE(control_finalize_countdown_mock(&c));
 	ASSERT_EQ(c.start_state, CTRL_START_RUNNING);
-	ASSERT_TRUE(c.car_running);
 }
 
 TEST(test_start_dedup_rejects_when_running)
@@ -556,7 +550,6 @@ TEST(test_start_dedup_rejects_when_running)
 	ASSERT_TRUE(control_finalize_countdown_mock(&c));
 	ASSERT_FALSE(control_request_start_mock(&c));
 	ASSERT_EQ(c.start_state, CTRL_START_RUNNING);
-	ASSERT_TRUE(c.car_running);
 }
 
 TEST(test_countdown_disables_idle_path)

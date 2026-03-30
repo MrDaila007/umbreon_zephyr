@@ -35,7 +35,6 @@ static K_THREAD_STACK_DEFINE(control_stack, CONTROL_STACK_SIZE);
 static struct k_thread control_thread_data;
 
 /* ─── State ───────────────────────────────────────────────────────────────── */
-static volatile bool car_running;
 static volatile bool manual_mode;
 static volatile bool drv_enabled;
 static volatile bool monitor_mode;
@@ -51,6 +50,7 @@ enum control_start_state {
 
 static enum control_start_state start_state = CTRL_START_IDLE;
 static bool start_cancel_requested;
+/* Protects start_state, start_cancel_requested, and external writes to mnv */
 static K_MUTEX_DEFINE(start_state_mutex);
 
 /* Stuck detection (persistent across work() calls) */
@@ -118,7 +118,7 @@ enum mnv_phase {
 	MNV_LONG_FORWARD,
 };
 
-static enum mnv_phase mnv;
+static volatile enum mnv_phase mnv;
 static int64_t  mnv_deadline;
 static int      mnv_steer;
 static uint32_t mnv_start_count;
@@ -126,11 +126,8 @@ static int      mnv_alt;
 
 /* ── Maneuver starters ──────────────────────────────────────────────────── */
 
-static void maneuver_start_back(void)
+static void maneuver_start_back(const struct car_settings *c)
 {
-	struct car_settings c;
-	settings_get_copy(&c);
-
 	int *s  = sensors_poll_mask(MASK_SIDES);
 	int left  = s[IDX_LEFT];
 	int right = s[IDX_RIGHT];
@@ -140,7 +137,7 @@ static void maneuver_start_back(void)
 	} else if (right > left + 50) {
 		mnv_steer = 600;
 	} else {
-		mnv_steer = c.race_cw ? -600 : 600;
+		mnv_steer = c->race_cw ? -600 : 600;
 	}
 
 	send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
@@ -150,25 +147,19 @@ static void maneuver_start_back(void)
 	stuck_time = 0;
 }
 
-static void maneuver_start_long(void)
+static void maneuver_start_long(const struct car_settings *c)
 {
-	struct car_settings c;
-	settings_get_copy(&c);
-
 	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
 	car_write_speed(0);
-	car_write_steer(c.race_cw ? 1000 : -1000);
+	car_write_steer(c->race_cw ? 1000 : -1000);
 	mnv_deadline = k_uptime_get() + 2000;
 	mnv = MNV_LONG_WAIT_STOP;
 }
 
 /* ── One tick of the maneuver state machine ─────────────────────────────── */
 
-static void maneuver_tick(void)
+static void maneuver_tick(const struct car_settings *c)
 {
-	struct car_settings c;
-	settings_get_copy(&c);
-
 	int64_t now = k_uptime_get();
 
 	switch (mnv) {
@@ -208,12 +199,12 @@ static void maneuver_tick(void)
 		mnv_alt = !mnv_alt;
 
 		uint32_t delta = taho_get_count() - mnv_start_count;
-		float dist = ((float)delta * (float)M_PI * c.wheel_diam_m)
-			     / (float)c.encoder_holes;
+		float dist = ((float)delta * (float)M_PI * c->wheel_diam_m)
+			     / (float)c->encoder_holes;
 
 		bool front_clear =
-			s[IDX_FRONT_LEFT]  > c.front_obstacle_dist &&
-			s[IDX_FRONT_RIGHT] > c.front_obstacle_dist;
+			s[IDX_FRONT_LEFT]  > c->front_obstacle_dist &&
+			s[IDX_FRONT_RIGHT] > c->front_obstacle_dist;
 
 		if ((front_clear && dist >= REVERSE_MIN_DIST) ||
 		    now >= mnv_deadline) {
@@ -266,7 +257,7 @@ static void maneuver_tick(void)
 	case MNV_LONG_REVERSE:
 		if (now >= mnv_deadline) {
 			car_write_speed(0);
-			car_write_steer(c.race_cw ? -700 : 700);
+			car_write_steer(c->race_cw ? -700 : 700);
 			car_write_speed_ms(2.0f);
 			mnv_deadline = now + 900;
 			mnv = MNV_LONG_FORWARD;
@@ -315,15 +306,12 @@ static void send_idle_telemetry(void)
 /* ─── work() — main autonomous control ────────────────────────────────────── */
 /* Port from Umbreon_roborace.ino:1087-1240 */
 
-static void work(void)
+static void work(const struct car_settings *c)
 {
-	struct car_settings c;
-	settings_get_copy(&c);
-
 	/* Maneuver in progress — advance state machine, skip normal logic */
 	if (mnv != MNV_NONE) {
 		imu_update();
-		maneuver_tick();
+		maneuver_tick(c);
 		return;
 	}
 
@@ -332,10 +320,10 @@ static void work(void)
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
 	int diff;
-	bool f_l = s[IDX_FRONT_LEFT]  < c.front_obstacle_dist;
-	bool f_r = s[IDX_FRONT_RIGHT] < c.front_obstacle_dist;
+	bool f_l = s[IDX_FRONT_LEFT]  < c->front_obstacle_dist;
+	bool f_r = s[IDX_FRONT_RIGHT] < c->front_obstacle_dist;
 
-	if (s[IDX_LEFT] > c.side_open_dist && s[IDX_RIGHT] > c.side_open_dist) {
+	if (s[IDX_LEFT] > c->side_open_dist && s[IDX_RIGHT] > c->side_open_dist) {
 		diff = WALL_FOLLOW_BIAS;
 	} else {
 		diff = s[IDX_RIGHT] - s[IDX_LEFT];
@@ -344,7 +332,7 @@ static void work(void)
 	/* All sensors close: hard turn */
 	bool all_close = true;
 	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (s[i] >= c.all_close_dist) {
+		if (s[i] >= c->all_close_dist) {
 			all_close = false;
 			break;
 		}
@@ -361,11 +349,11 @@ static void work(void)
 	float coef, spd;
 
 	if (how_clear == 0) {
-		coef = c.coe_clear;
-		spd = c.spd_clear;
+		coef = c->coe_clear;
+		spd = c->spd_clear;
 	} else {
-		coef = c.coe_blocked;
-		spd = c.spd_blocked;
+		coef = c->coe_blocked;
+		spd = c->spd_blocked;
 	}
 
 	/* Track learning integration */
@@ -403,8 +391,8 @@ static void work(void)
 	}
 
 	/* ── Stuck detection ───────────────────────────────────────────────── */
-	bool c_fl = s[IDX_FRONT_LEFT]  < c.close_front_dist;
-	bool c_fr = s[IDX_FRONT_RIGHT] < c.close_front_dist;
+	bool c_fl = s[IDX_FRONT_LEFT]  < c->close_front_dist;
+	bool c_fr = s[IDX_FRONT_RIGHT] < c->close_front_dist;
 	bool low_speed = taho_get_speed() < 0.1f;
 
 	bool blocked = c_fl || c_fr;
@@ -415,26 +403,26 @@ static void work(void)
 		stuck_time = 0;
 	}
 
-	if (stuck_time > c.stuck_thresh) {
-		maneuver_start_back();
+	if (stuck_time > c->stuck_thresh) {
+		maneuver_start_back(c);
 		return;
 	}
 
 	/* ── Wrong-direction detection ─────────────────────────────────────── */
-	turns += imu_get_yaw_rate() * (c.loop_ms / 1000.0f);
-	if (c.race_cw && turns < 0.0f) {
+	turns += imu_get_yaw_rate() * (c->loop_ms / 1000.0f);
+	if (c->race_cw && turns < 0.0f) {
 		turns *= 0.97f;
 	}
-	if (!c.race_cw && turns > 0.0f) {
+	if (!c->race_cw && turns > 0.0f) {
 		turns *= 0.97f;
 	}
 	turns = CLAMP(turns, -200.0f, 200.0f);
 
-	bool wrong_way = c.race_cw ? (turns > c.wrong_dir_deg)
-				   : (turns < -c.wrong_dir_deg);
+	bool wrong_way = c->race_cw ? (turns > c->wrong_dir_deg)
+				     : (turns < -c->wrong_dir_deg);
 
 	if (wrong_way) {
-		maneuver_start_long();
+		maneuver_start_long(c);
 		return;
 	}
 }
@@ -542,7 +530,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 		} else if (running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;
-			work();
+			work(&c);
 		} else if (drv_active) {
 			/* Manual drive mode */
 			int *s = sensors_poll();
@@ -567,7 +555,7 @@ static void control_thread(void *p1, void *p2, void *p3)
 					k_mutex_lock(&start_state_mutex, K_FOREVER);
 					start_cancel_requested = true;
 					start_state = CTRL_START_IDLE;
-					car_running = false;
+					mnv = MNV_NONE;
 					k_mutex_unlock(&start_state_mutex);
 					display_notify_run_state(false);
 					drv_enabled = false;
@@ -618,7 +606,6 @@ bool control_request_start(void)
 	if (start_state == CTRL_START_IDLE) {
 		start_state = CTRL_START_COUNTDOWN;
 		start_cancel_requested = false;
-		car_running = false;
 		accepted = true;
 	}
 	k_mutex_unlock(&start_state_mutex);
@@ -631,7 +618,6 @@ void control_cancel_start_request(void)
 	if (start_state == CTRL_START_COUNTDOWN) {
 		start_cancel_requested = true;
 		start_state = CTRL_START_IDLE;
-		car_running = false;
 	}
 	k_mutex_unlock(&start_state_mutex);
 }
@@ -646,7 +632,9 @@ void control_cmd_start(void)
 	imu_reset_heading();
 	stuck_time = 0;
 	turns = 0.0f;
+	k_mutex_lock(&start_state_mutex, K_FOREVER);
 	mnv = MNV_NONE;
+	k_mutex_unlock(&start_state_mutex);
 	run_telem_div = 0;
 	run_state = RUN_CLEAR;
 
@@ -667,7 +655,6 @@ void control_cmd_start(void)
 	k_mutex_lock(&start_state_mutex, K_FOREVER);
 	if (start_state == CTRL_START_COUNTDOWN && !start_cancel_requested) {
 		start_state = CTRL_START_RUNNING;
-		car_running = true;
 		entered_run = true;
 	}
 	k_mutex_unlock(&start_state_mutex);
@@ -698,10 +685,9 @@ void control_cmd_stop(void)
 	k_mutex_lock(&start_state_mutex, K_FOREVER);
 	start_cancel_requested = true;
 	start_state = CTRL_START_IDLE;
-	car_running = false;
+	mnv = MNV_NONE;
 	k_mutex_unlock(&start_state_mutex);
 
-	mnv = MNV_NONE;
 	monitor_mode = false;
 	display_notify_run_state(false);
 	drv_enabled = false;

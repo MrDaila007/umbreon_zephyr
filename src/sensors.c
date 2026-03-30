@@ -18,7 +18,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 #include <vl53l0x_enhanced.h>
 #endif
 
@@ -29,7 +29,7 @@ LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 static int distances[SENSOR_COUNT]; /* cm×10 */
 static int online_count;
 
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 /* ─── Device handles ──────────────────────────────────────────────────────── */
 static const struct device *vl53_devs[SENSOR_COUNT];
 static bool vl53_valid[SENSOR_COUNT];
@@ -45,7 +45,7 @@ extern void wdt_feed_kick(void);
 
 void sensors_init(void)
 {
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 	/* Try I2C bus recovery before initializing sensors */
 	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 	if (device_is_ready(i2c1)) {
@@ -135,7 +135,7 @@ void sensors_init(void)
 
 /* ─── Poll ────────────────────────────────────────────────────────────────── */
 
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 static void store_mm(int i, int mm)
 {
 	if (mm >= VL53L0X_MAX_RAW || mm <= 0) {
@@ -171,7 +171,7 @@ static void poll_one(int i)
 
 int *sensors_poll(void)
 {
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 	for (int i = 0; i < SENSOR_COUNT; i++) {
 		poll_one(i);
 	}
@@ -181,7 +181,7 @@ int *sensors_poll(void)
 
 int *sensors_poll_mask(uint8_t mask)
 {
-#if DT_HAS_ST_VL53L0X_ENABLED
+#if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 	for (int i = 0; i < SENSOR_COUNT; i++) {
 		if (mask & BIT(i)) {
 			poll_one(i);

@@ -68,6 +68,15 @@ static volatile bool log_on;
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
+/* After loading/resetting config, sync the tach glitch filter with the
+ * (potentially changed) setting value. */
+static void sync_tach_glitch_filter(void)
+{
+	struct car_settings c;
+	settings_get_copy(&c);
+	taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+}
+
 /* ─── Async command worker (long-running commands) ──────────────────────── */
 #define WIFI_ASYNC_STACK_SIZE 3072
 #define WIFI_ASYNC_PRIORITY   6
@@ -164,7 +173,7 @@ void wifi_cmd_send(const char *str)
 
 void wifi_cmd_printf(const char *fmt, ...)
 {
-	char buf[256];
+	char buf[384];
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
@@ -267,6 +276,7 @@ static void uart_isr(const struct device *dev, void *user_data)
 
 /* ─── SET command parser ──────────────────────────────────────────────────── */
 
+/* Must be called under settings_lock(). Writes directly to global cfg. */
 static bool parse_set_pair(const char *pair)
 {
 	const char *eq = strchr(pair, '=');
@@ -478,6 +488,22 @@ static void cmd_help(void)
 	);
 }
 
+/* Try to initiate async start sequence. Sends NAK on failure, ACK on success. */
+static void try_start_async(void)
+{
+	if (!control_request_start()) {
+		wifi_cmd_send(control_is_running() ? "$NAK:already_running\n"
+						   : "$NAK:already_starting\n");
+		return;
+	}
+	if (!queue_async_start()) {
+		control_cancel_start_request();
+		wifi_cmd_send("$NAK:busy\n");
+		return;
+	}
+	wifi_cmd_send("$ACK\n");
+}
+
 /* ─── Command dispatcher ─────────────────────────────────────────────────── */
 
 static void dispatch_command(const char *line)
@@ -493,29 +519,17 @@ static void dispatch_command(const char *line)
 		wifi_cmd_send("$ACK\n");
 	} else if (strcmp(line, "$LOAD") == 0) {
 		if (settings_load()) {
-			struct car_settings c;
-			settings_get_copy(&c);
-			taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+			sync_tach_glitch_filter();
 			wifi_cmd_send("$ACK\n");
 		} else {
 			wifi_cmd_send("$NAK:no_saved_config\n");
 		}
 	} else if (strcmp(line, "$RST") == 0) {
 		settings_reset();
-		struct car_settings c;
-		settings_get_copy(&c);
-		taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+		sync_tach_glitch_filter();
 		wifi_cmd_send("$ACK\n");
 	} else if (strcmp(line, "$START") == 0) {
-		if (!control_request_start()) {
-			wifi_cmd_send(control_is_running() ? "$NAK:already_running\n"
-						 : "$NAK:already_starting\n");
-		} else if (!queue_async_start()) {
-			control_cancel_start_request();
-			wifi_cmd_send("$NAK:busy\n");
-		} else {
-			wifi_cmd_send("$ACK\n");
-		}
+		try_start_async();
 	} else if (strcmp(line, "$STOP") == 0) {
 		control_cmd_stop();
 	} else if (strcmp(line, "$MONITOR") == 0) {
@@ -625,34 +639,20 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 		while (k_msgq_get(&menu_cmd_q, &mcmd, K_NO_WAIT) == 0) {
 			switch (mcmd) {
 			case MCMD_START:
-				if (!control_request_start()) {
-					wifi_cmd_send(control_is_running() ? "$NAK:already_running\n"
-								 : "$NAK:already_starting\n");
-				} else if (!queue_async_start()) {
-					control_cancel_start_request();
-					wifi_cmd_send("$NAK:busy\n");
-				} else {
-					wifi_cmd_send("$ACK\n");
-				}
+				try_start_async();
 				break;
 			case MCMD_STOP:  control_cmd_stop();  break;
 			case MCMD_SAVE:  settings_save(); wifi_cmd_send("$ACK\n"); break;
-			case MCMD_LOAD: {
+			case MCMD_LOAD:
 				settings_load();
-				struct car_settings c;
-				settings_get_copy(&c);
-				taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+				sync_tach_glitch_filter();
 				wifi_cmd_send("$ACK\n");
 				break;
-			}
-			case MCMD_RESET: {
+			case MCMD_RESET:
 				settings_reset();
-				struct car_settings c;
-				settings_get_copy(&c);
-				taho_set_glitch_filter_us((uint32_t)c.tach_glitch_filter_us);
+				sync_tach_glitch_filter();
 				wifi_cmd_send("$ACK\n");
 				break;
-			}
 			default:
 				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
 					static const char *test_names[] = {

@@ -6,3 +6,7 @@ __pycache__/
 *.bin
 *.hex
 *.map
+
+# Host test binaries
+tests/test_unit
+tests/test_maneuver
