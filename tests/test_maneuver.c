@@ -60,6 +60,7 @@ struct car_settings {
 	float wrong_dir_deg;
 	bool race_cw;
 	int stuck_thresh;
+	int stall_thresh;
 	bool imu_rotate, servo_reverse, calibrated;
 	bool bat_enabled;
 	float bat_multiplier, bat_low;
@@ -377,6 +378,7 @@ static void reset_all(void)
 	cfg.loop_ms             = 40;
 	cfg.race_cw             = true;
 	cfg.stuck_thresh        = 25;
+	cfg.stall_thresh        = 50;
 	cfg.wrong_dir_deg       = 120.0f;
 }
 

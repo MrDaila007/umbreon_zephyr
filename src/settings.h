@@ -48,6 +48,7 @@ struct car_settings {
 	float wrong_dir_deg;
 	bool race_cw;
 	int stuck_thresh;
+	int stall_thresh;
 
 	/* IMU */
 	bool imu_rotate;

@@ -27,7 +27,7 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   9
+#define SETTINGS_VERSION   10
 
 static struct nvs_fs nvs;
 static bool nvs_ready;
@@ -62,6 +62,7 @@ struct __attribute__((packed)) nvs_settings {
 	float    wrong_dir_deg;
 	uint8_t  race_cw;
 	int16_t  stuck_thresh;
+	int16_t  stall_thresh;
 	uint8_t  imu_rotate;
 	uint8_t  servo_reverse;
 	uint8_t  calibrated;
@@ -109,6 +110,7 @@ static void set_defaults(void)
 	cfg.wrong_dir_deg = 120.0f;
 	cfg.race_cw       = true;
 	cfg.stuck_thresh  = 25;
+	cfg.stall_thresh  = 50;
 	cfg.imu_rotate    = true;
 	cfg.servo_reverse = false;
 	cfg.calibrated    = false;
@@ -140,6 +142,7 @@ static void sanitize_cfg(void)
 	cfg.loop_ms = CLAMP(cfg.loop_ms, 10, 1000);
 	cfg.kick_ms = CLAMP(cfg.kick_ms, 0, 5000);
 	cfg.stuck_thresh = CLAMP(cfg.stuck_thresh, 0, 1000);
+	cfg.stall_thresh = CLAMP(cfg.stall_thresh, 0, 1000);
 	cfg.tach_glitch_filter_us = CLAMP(cfg.tach_glitch_filter_us, 1, 500);
 
 	cfg.pid_kp = CLAMP(cfg.pid_kp, 0.0f, 5000.0f);
@@ -214,6 +217,7 @@ static void populate_nvs(struct nvs_settings *s)
 	s->wrong_dir_deg = cfg.wrong_dir_deg;
 	s->race_cw       = cfg.race_cw ? 1 : 0;
 	s->stuck_thresh  = (int16_t)cfg.stuck_thresh;
+	s->stall_thresh  = (int16_t)cfg.stall_thresh;
 	s->imu_rotate    = cfg.imu_rotate ? 1 : 0;
 	s->servo_reverse = cfg.servo_reverse ? 1 : 0;
 	s->calibrated    = cfg.calibrated ? 1 : 0;
@@ -253,6 +257,7 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.wrong_dir_deg = s->wrong_dir_deg;
 	cfg.race_cw       = s->race_cw != 0;
 	cfg.stuck_thresh  = s->stuck_thresh;
+	cfg.stall_thresh  = s->stall_thresh;
 	cfg.imu_rotate    = s->imu_rotate != 0;
 	cfg.servo_reverse = s->servo_reverse != 0;
 	cfg.calibrated    = s->calibrated != 0;

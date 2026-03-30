@@ -56,6 +56,7 @@ struct car_settings {
 	float wrong_dir_deg;
 	bool race_cw;
 	int stuck_thresh;
+	int stall_thresh;
 	bool imu_rotate;
 	bool servo_reverse;
 	bool calibrated;
@@ -110,6 +111,7 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
 	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
+	else if (strcmp(key, "STL")  == 0) cfg.stall_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -559,6 +561,161 @@ TEST(test_countdown_disables_idle_path)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: parse_set_pair — STL key
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_parse_stl_normal)
+{
+	cfg.stall_thresh = 0;
+	ASSERT_TRUE(parse_set_pair("STL=50"));
+	ASSERT_EQ(cfg.stall_thresh, 50);
+}
+
+TEST(test_parse_stl_zero_disables)
+{
+	cfg.stall_thresh = 50;
+	ASSERT_TRUE(parse_set_pair("STL=0"));
+	ASSERT_EQ(cfg.stall_thresh, 0);
+}
+
+TEST(test_parse_stl_clamp_negative)
+{
+	cfg.stall_thresh = 50;
+	ASSERT_TRUE(parse_set_pair("STL=-1"));
+	ASSERT_EQ(cfg.stall_thresh, 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: stuck/stall detection logic
+ *
+ * Extracted decision logic from control.c work() — pure function form.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+struct detect_result {
+	int stuck_time;
+	int stall_time;
+	bool trigger;
+};
+
+static struct detect_result stuck_stall_detect(
+	int prev_stuck, int prev_stall,
+	bool c_fl, bool c_fr, bool low_speed,
+	float spd, int stuck_thresh, int stall_thresh)
+{
+	struct detect_result r = { .trigger = false };
+	bool blocked = c_fl || c_fr;
+
+	/* Path 1: sensor-confirmed */
+	r.stuck_time = (blocked && low_speed) ? prev_stuck + 1 : 0;
+	if (r.stuck_time > stuck_thresh) {
+		r.trigger = true;
+		r.stall_time = prev_stall;
+		return r;
+	}
+
+	/* Path 2: motor stall */
+	r.stall_time = (stall_thresh > 0 && low_speed && spd > 0.05f)
+			? prev_stall + 1 : 0;
+	if (r.stall_time > stall_thresh) {
+		r.stall_time = 0;
+		r.trigger = true;
+	}
+	return r;
+}
+
+TEST(test_stall_no_trigger_when_moving)
+{
+	/* Speed OK, no wall → both counters stay 0 */
+	struct detect_result r = stuck_stall_detect(
+		0, 0,		/* prev_stuck, prev_stall */
+		false, false,	/* c_fl, c_fr */
+		false,		/* low_speed = false (moving) */
+		0.48f,		/* spd (commanded) */
+		25, 50);	/* stuck_thresh, stall_thresh */
+	ASSERT_EQ(r.stuck_time, 0);
+	ASSERT_EQ(r.stall_time, 0);
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_stall_no_trigger_not_commanded)
+{
+	/* Motor not spinning but speed not commanded → stall should NOT fire */
+	struct detect_result r = stuck_stall_detect(
+		0, 0, false, false,
+		true,		/* low_speed */
+		0.0f,		/* spd = 0 (not commanded) */
+		25, 50);
+	ASSERT_EQ(r.stall_time, 0);
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_stall_increments_without_wall)
+{
+	/* Motor stalled, speed commanded, no wall → stall_time increments */
+	struct detect_result r = stuck_stall_detect(
+		0, 10, false, false,
+		true,		/* low_speed */
+		0.48f,		/* spd commanded */
+		25, 50);
+	ASSERT_EQ(r.stuck_time, 0);  /* no wall → stuck stays 0 */
+	ASSERT_EQ(r.stall_time, 11); /* incremented from 10 */
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_stall_triggers_at_threshold)
+{
+	/* stall_time reaches stall_thresh+1 → trigger, counter resets */
+	struct detect_result r = stuck_stall_detect(
+		0, 50, false, false,
+		true, 0.48f, 25, 50);
+	ASSERT_TRUE(r.trigger);
+	ASSERT_EQ(r.stall_time, 0);  /* reset after trigger */
+}
+
+TEST(test_stuck_triggers_before_stall)
+{
+	/* Both conditions met → stuck_time triggers first (lower thresh) */
+	struct detect_result r = stuck_stall_detect(
+		25, 20,		/* prev_stuck at threshold, prev_stall below */
+		true, false,	/* wall detected */
+		true, 0.48f, 25, 50);
+	ASSERT_TRUE(r.trigger);
+	ASSERT_EQ(r.stuck_time, 26);  /* exceeded stuck_thresh */
+}
+
+TEST(test_stall_disabled_when_zero)
+{
+	/* stall_thresh = 0 → stall path disabled */
+	struct detect_result r = stuck_stall_detect(
+		0, 99, false, false,
+		true, 0.48f, 25, 0);
+	ASSERT_EQ(r.stall_time, 0);
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_stall_resets_on_speed_recovery)
+{
+	/* Was stalling, motor starts spinning → stall_time resets */
+	struct detect_result r = stuck_stall_detect(
+		0, 30, false, false,
+		false,		/* low_speed = false (recovered) */
+		0.48f, 25, 50);
+	ASSERT_EQ(r.stall_time, 0);
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_stuck_sensor_confirmed_still_works)
+{
+	/* Regression: wall + low_speed still triggers at stuck_thresh */
+	struct detect_result r = stuck_stall_detect(
+		25, 0,
+		true, true,	/* both front sensors see wall */
+		true, 0.48f, 25, 50);
+	ASSERT_TRUE(r.trigger);
+	ASSERT_EQ(r.stuck_time, 26);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Main
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -625,6 +782,21 @@ int main(void)
 	RUN_TEST(test_start_finalize_moves_to_running);
 	RUN_TEST(test_start_dedup_rejects_when_running);
 	RUN_TEST(test_countdown_disables_idle_path);
+
+	printf("\n[parse_set_pair — STL]\n");
+	RUN_TEST(test_parse_stl_normal);
+	RUN_TEST(test_parse_stl_zero_disables);
+	RUN_TEST(test_parse_stl_clamp_negative);
+
+	printf("\n[stuck_stall_detect]\n");
+	RUN_TEST(test_stall_no_trigger_when_moving);
+	RUN_TEST(test_stall_no_trigger_not_commanded);
+	RUN_TEST(test_stall_increments_without_wall);
+	RUN_TEST(test_stall_triggers_at_threshold);
+	RUN_TEST(test_stuck_triggers_before_stall);
+	RUN_TEST(test_stall_disabled_when_zero);
+	RUN_TEST(test_stall_resets_on_speed_recovery);
+	RUN_TEST(test_stuck_sensor_confirmed_still_works);
 
 	TEST_SUMMARY();
 }

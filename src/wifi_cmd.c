@@ -56,8 +56,14 @@ static int cmd_len;
 #define TX_BUF_SIZE 1024
 static uint8_t tx_buf[TX_BUF_SIZE];
 static volatile uint16_t tx_head;  /* written by threads (under mutex) */
-static volatile uint16_t tx_tail;  /* read by ISR */
+static volatile uint16_t tx_tail;  /* written by ISR only */
 static K_MUTEX_DEFINE(tx_mutex);
+
+/* ─── TX overflow ring buffer (absorbs bursts when main ring is full) ───── */
+#define OVF_BUF_SIZE 512
+static uint8_t ovf_buf[OVF_BUF_SIZE];
+static volatile uint16_t ovf_head;  /* written by threads (under tx_mutex) */
+static volatile uint16_t ovf_tail;  /* written by ISR only */
 
 /* ─── Debug log flag ──────────────────────────────────────────────────────── */
 static volatile bool log_on;
@@ -156,16 +162,36 @@ void wifi_cmd_send(const char *str)
 
 	k_mutex_lock(&tx_mutex, K_FOREVER);
 
+	/* If overflow has pending data, all new data must go there to keep FIFO */
+	bool use_ovf = (ovf_head != ovf_tail);
+
 	for (const char *p = str; *p; p++) {
-		uint16_t next = (tx_head + 1) % TX_BUF_SIZE;
-		if (next == tx_tail) {
-			break;  /* ring buffer full — drop rest */
+		if (use_ovf) {
+			uint16_t onext = (ovf_head + 1) % OVF_BUF_SIZE;
+			if (onext == ovf_tail) {
+				break;  /* both buffers full — drop */
+			}
+			ovf_buf[ovf_head] = (uint8_t)*p;
+			ovf_head = onext;
+		} else {
+			uint16_t next = (tx_head + 1) % TX_BUF_SIZE;
+			if (next == tx_tail) {
+				/* Ring full — switch to overflow */
+				use_ovf = true;
+				uint16_t onext = (ovf_head + 1) % OVF_BUF_SIZE;
+				if (onext == ovf_tail) {
+					break;
+				}
+				ovf_buf[ovf_head] = (uint8_t)*p;
+				ovf_head = onext;
+			} else {
+				tx_buf[tx_head] = (uint8_t)*p;
+				tx_head = next;
+			}
 		}
-		tx_buf[tx_head] = (uint8_t)*p;
-		tx_head = next;
 	}
 
-	/* Kick TX IRQ — ISR will drain the buffer */
+	/* Kick TX IRQ — ISR will drain both buffers */
 	uart_irq_tx_enable(uart_dev);
 
 	k_mutex_unlock(&tx_mutex);
@@ -251,24 +277,32 @@ static void uart_isr(const struct device *dev, void *user_data)
 		}
 	}
 
-	/* ── TX — drain ring buffer via FIFO ──────────────────────────────── */
+	/* ── TX — drain main ring, then overflow ─────────────────────────── */
 	if (uart_irq_tx_ready(dev)) {
 		uint16_t t = tx_tail;
-		if (t == tx_head) {
-			/* Nothing left to send */
-			uart_irq_tx_disable(dev);
-		} else {
-			/* Build a contiguous chunk to send */
-			uint16_t h = tx_head;
-			uint16_t len;
-			if (h > t) {
-				len = h - t;
-			} else {
-				len = TX_BUF_SIZE - t;  /* up to wrap */
-			}
+		uint16_t h = tx_head;
+
+		if (t != h) {
+			/* Drain main ring */
+			uint16_t len = (h > t) ? (h - t)
+						: (TX_BUF_SIZE - t);
 			int sent = uart_fifo_fill(dev, &tx_buf[t], len);
 			if (sent > 0) {
 				tx_tail = (t + sent) % TX_BUF_SIZE;
+			}
+		} else {
+			/* Main ring empty — drain overflow */
+			uint16_t ot = ovf_tail;
+			uint16_t oh = ovf_head;
+			if (ot != oh) {
+				uint16_t len = (oh > ot) ? (oh - ot)
+							 : (OVF_BUF_SIZE - ot);
+				int sent = uart_fifo_fill(dev, &ovf_buf[ot], len);
+				if (sent > 0) {
+					ovf_tail = (ot + sent) % OVF_BUF_SIZE;
+				}
+			} else {
+				uart_irq_tx_disable(dev);
 			}
 		}
 	}
@@ -319,6 +353,7 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
 	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
+	else if (strcmp(key, "STL")  == 0) cfg.stall_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -338,29 +373,38 @@ static void cmd_get(void)
 	struct car_settings c;
 	settings_get_copy(&c);
 
+	/* Chunk 1: thresholds + PID + ESC */
 	wifi_cmd_printf(
 		"$CFG:FOD=%d,SOD=%d,ACD=%d,CFD=%d"
 		",KP=%.4f,KI=%.4f,KD=%.4f"
 		",MSP=%d,XSP=%d,BSP=%d"
-		",MNP=%d,XNP=%d,NTP=%d"
-		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d,COE1=%.2f,COE2=%.2f"
-		",WDD=%.1f,RCW=%d,STK=%d"
-		",IMR=%d,SVR=%d,CAL=%d"
-		",BEN=%d,BML=%.4f,BLV=%.1f"
-		",TGF=%d"
-		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
+		",MNP=%d,XNP=%d,NTP=%d",
 		c.front_obstacle_dist, c.side_open_dist,
 		c.all_close_dist, c.close_front_dist,
 		(double)c.pid_kp, (double)c.pid_ki, (double)c.pid_kd,
 		c.min_speed, c.max_speed, c.min_bspeed,
-		c.min_point, c.max_point, c.neutral_point,
+		c.min_point, c.max_point, c.neutral_point);
+
+	/* Chunk 2: tachometer + speed + navigation */
+	wifi_cmd_printf(
+		",ENH=%d,WDM=%.4f,LMS=%d"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d"
+		",COE1=%.2f,COE2=%.2f"
+		",WDD=%.1f,RCW=%d,STK=%d,STL=%d",
 		c.encoder_holes, (double)c.wheel_diam_m, c.loop_ms,
 		(double)c.spd_clear, (double)c.spd_blocked,
 		(double)c.spd_slew,
 		(double)c.kick_pct, c.kick_ms,
 		(double)c.coe_clear, (double)c.coe_blocked,
-		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0, c.stuck_thresh,
+		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0,
+		c.stuck_thresh, c.stall_thresh);
+
+	/* Chunk 3: flags + system info */
+	wifi_cmd_printf(
+		",IMR=%d,SVR=%d,CAL=%d"
+		",BEN=%d,BML=%.4f,BLV=%.1f"
+		",TGF=%d"
+		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,

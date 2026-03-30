@@ -55,6 +55,7 @@ static K_MUTEX_DEFINE(start_state_mutex);
 
 /* Stuck detection (persistent across work() calls) */
 static int stuck_time;
+static int stall_time;
 static float turns;
 
 /* ─── RUN sub-state telemetry ────────────────────────────────────────────── */
@@ -64,6 +65,7 @@ enum run_substate {
 	RUN_STUCK_WAIT = 2,
 	RUN_REVERSE    = 3,
 	RUN_WRONG_DIR  = 4,
+	RUN_STALL      = 5,
 };
 static volatile int run_state;
 static int run_telem_div;
@@ -375,7 +377,9 @@ static void work(const struct car_settings *c)
 
 	/* ── RUN sub-state telemetry ───────────────────────────────────────── */
 	int cur_state;
-	if (stuck_time > 0) {
+	if (stall_time > 0 && stuck_time == 0) {
+		cur_state = RUN_STALL;
+	} else if (stuck_time > 0) {
 		cur_state = RUN_STUCK_WAIT;
 	} else if (how_clear > 0) {
 		cur_state = RUN_BLOCKED;
@@ -394,16 +398,27 @@ static void work(const struct car_settings *c)
 	bool c_fl = s[IDX_FRONT_LEFT]  < c->close_front_dist;
 	bool c_fr = s[IDX_FRONT_RIGHT] < c->close_front_dist;
 	bool low_speed = taho_get_speed() < 0.1f;
-
 	bool blocked = c_fl || c_fr;
 
+	/* Path 1: sensor-confirmed (wall + not moving) — fast trigger */
 	if (blocked && low_speed) {
 		stuck_time++;
 	} else {
 		stuck_time = 0;
 	}
-
 	if (stuck_time > c->stuck_thresh) {
+		maneuver_start_back(c);
+		return;
+	}
+
+	/* Path 2: motor stall (commanded but not moving) — slow trigger */
+	if (c->stall_thresh > 0 && low_speed && spd > 0.05f) {
+		stall_time++;
+	} else {
+		stall_time = 0;
+	}
+	if (stall_time > c->stall_thresh) {
+		stall_time = 0;
 		maneuver_start_back(c);
 		return;
 	}
@@ -631,6 +646,7 @@ void control_cmd_start(void)
 	car_pid_reset();
 	imu_reset_heading();
 	stuck_time = 0;
+	stall_time = 0;
 	turns = 0.0f;
 	k_mutex_lock(&start_state_mutex, K_FOREVER);
 	mnv = MNV_NONE;
