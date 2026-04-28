@@ -605,8 +605,8 @@ static struct detect_result stuck_stall_detect(
 	struct detect_result r = { .trigger = false };
 	bool blocked = c_fl || c_fr;
 
-	/* Path 1: sensor-confirmed */
-	r.stuck_time = (blocked && low_speed) ? prev_stuck + 1 : 0;
+	/* Path 1: sensor-confirmed wall hit */
+	r.stuck_time = blocked ? prev_stuck + 1 : 0;
 	if (r.stuck_time > stuck_thresh) {
 		r.trigger = true;
 		r.stall_time = prev_stall;
@@ -635,6 +635,31 @@ TEST(test_stall_no_trigger_when_moving)
 	ASSERT_EQ(r.stuck_time, 0);
 	ASSERT_EQ(r.stall_time, 0);
 	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_wall_hit_increments_even_with_tach_noise)
+{
+	/* Front close should not rely on low_speed; tach noise may report motion. */
+	struct detect_result r = stuck_stall_detect(
+		10, 0,
+		true, false,	/* wall detected */
+		false,		/* tachometer still reports moving */
+		0.48f, 25, 50);
+	ASSERT_EQ(r.stuck_time, 11);
+	ASSERT_EQ(r.stall_time, 0);
+	ASSERT_FALSE(r.trigger);
+}
+
+TEST(test_wall_hit_triggers_even_with_tach_noise)
+{
+	/* Regression: wall-hit recovery must fire even if low_speed is false. */
+	struct detect_result r = stuck_stall_detect(
+		25, 0,
+		false, true,	/* one front sensor is enough */
+		false,		/* noisy tachometer */
+		0.48f, 25, 50);
+	ASSERT_TRUE(r.trigger);
+	ASSERT_EQ(r.stuck_time, 26);
 }
 
 TEST(test_stall_no_trigger_not_commanded)
@@ -790,6 +815,8 @@ int main(void)
 
 	printf("\n[stuck_stall_detect]\n");
 	RUN_TEST(test_stall_no_trigger_when_moving);
+	RUN_TEST(test_wall_hit_increments_even_with_tach_noise);
+	RUN_TEST(test_wall_hit_triggers_even_with_tach_noise);
 	RUN_TEST(test_stall_no_trigger_not_commanded);
 	RUN_TEST(test_stall_increments_without_wall);
 	RUN_TEST(test_stall_triggers_at_threshold);

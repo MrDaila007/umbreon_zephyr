@@ -400,8 +400,10 @@ static void work(const struct car_settings *c)
 	bool low_speed = taho_get_speed() < 0.1f;
 	bool blocked = c_fl || c_fr;
 
-	/* Path 1: sensor-confirmed (wall + not moving) — fast trigger */
-	if (blocked && low_speed) {
+	/* Path 1: sensor-confirmed wall hit — fast trigger.
+	 * Do not depend on tachometer speed here: encoder noise can make a
+	 * physically stopped car look like it is still moving. */
+	if (blocked) {
 		stuck_time++;
 	} else {
 		stuck_time = 0;
