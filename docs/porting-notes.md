@@ -91,7 +91,16 @@ This was dropped in the Zephyr port — all configuration is via WiFi commands.
 
 ## Zephyr Version Notes
 
-**Recommended: Zephyr v4.3.0+** — RP2350 flash support is upstream, no patches needed.
+**Recommended: Zephyr v4.4.0+** — RP2350 flash support is upstream, no patches needed.
+
+### v4.3 → v4.4 migration (done 2026-04-28)
+
+- NVS/ZMS headers moved from `zephyr/fs/` to `zephyr/kvss/` subsystem:
+  - `src/settings.c`: `#include <zephyr/fs/nvs.h>` → `#include <zephyr/kvss/nvs.h>`
+  - `src/track_learn.c`: same change
+- Minimum Zephyr SDK updated from 0.17.0 to 1.0.0
+- No RP2350/rpi_pico2 board renames, no API changes in I2C/PWM/GPIO/ADC/UART
+- No prj.conf changes required
 
 ### v4.1 → v4.3 migration (done 2026-03-26)
 

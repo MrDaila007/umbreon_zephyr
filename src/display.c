@@ -36,8 +36,10 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 #define DISPLAY_REFRESH_MS   120
 #define INACTIVITY_MS        10000
 
+#if 0 /* enabled with display thread below */
 static K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
 static struct k_thread display_thread_data;
+#endif
 
 /* ─── I2C0 bus mutex (shared with IMU) ───────────────────────────────────── */
 K_MUTEX_DEFINE(i2c0_mutex);
@@ -45,14 +47,19 @@ K_MUTEX_DEFINE(i2c0_mutex);
 /* ─── Menu command queue ─────────────────────────────────────────────────── */
 K_MSGQ_DEFINE(menu_cmd_q, sizeof(uint8_t), 4, 4);
 
+/* ─── State shared with public API ──────────────────────────────────────── */
+static volatile bool car_is_running;
+static volatile bool test_is_active;
+
+/* ─── Display menu system (disabled until hardware wired) ────────────────── */
+#if 0
+
 /* ─── Wake event ─────────────────────────────────────────────────────────── */
 static K_EVENT_DEFINE(display_event);
 #define EVT_WAKE BIT(0)
 
-/* ─── State ──────────────────────────────────────────────────────────────── */
+/* ─── Display device ─────────────────────────────────────────────────────── */
 static const struct device *oled_dev;
-static volatile bool car_is_running;
-static volatile bool test_is_active;
 
 /* ─── Screen state machine ───────────────────────────────────────────────── */
 enum screen {
@@ -946,6 +953,7 @@ static void enc_watch_handler(struct k_work *work)
 
 	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 }
+#endif /* display thread + enc_watch disabled */
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
 

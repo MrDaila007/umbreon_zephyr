@@ -10,7 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/storage/flash_map.h>
-#include <zephyr/fs/nvs.h>
+#include <zephyr/kvss/nvs.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <math.h>
@@ -20,7 +20,7 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 
 /* ─── NVS setup ───────────────────────────────────────────────────────────── */
 #define NVS_PARTITION      storage_partition
-#define NVS_PARTITION_ID   FIXED_PARTITION_ID(NVS_PARTITION)
+#define NVS_PARTITION_ID   PARTITION_ID(NVS_PARTITION)
 
 #define NVS_KEY_SETTINGS   1
 #define NVS_KEY_TRACK_HDR  2

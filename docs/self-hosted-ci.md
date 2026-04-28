@@ -9,7 +9,7 @@
 Proxmox VE (хост)
   └── LXC контейнер (Ubuntu 24.04)
         ├── GitHub Actions Runner (systemd)
-        ├── Zephyr SDK 0.17 + workspace v4.3
+        ├── Zephyr SDK 1.0 + workspace v4.4
         ├── ESP8266 RTOS SDK + Xtensa (umbreon_esp_web)
         ├── OpenOCD
         └── USB ──► ST-Link ──► SWD ──► Pico 2   (опционально, HIL)
@@ -150,10 +150,10 @@ make install
 
 ```bash
 # SDK
-wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
-tar xf zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz -C /opt/
-rm zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
-cd /opt/zephyr-sdk-0.17.0 && ./setup.sh -t arm-zephyr-eabi -c
+wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v1.0.0/zephyr-sdk-1.0.0_linux-x86_64_minimal.tar.xz
+tar xf zephyr-sdk-1.0.0_linux-x86_64_minimal.tar.xz -C /opt/
+rm zephyr-sdk-1.0.0_linux-x86_64_minimal.tar.xz
+cd /opt/zephyr-sdk-1.0.0 && ./setup.sh -t arm-zephyr-eabi -c
 
 # Workspace (от имени пользователя runner, см. ниже)
 ```
@@ -221,7 +221,7 @@ su - runner
 python3 -m venv ~/.zephyr-west-bootstrap
 source ~/.zephyr-west-bootstrap/bin/activate
 pip install west
-west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0 ~/zephyrproject
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 ~/zephyrproject
 cd ~/zephyrproject
 west update --narrow -o=--depth=1
 deactivate
