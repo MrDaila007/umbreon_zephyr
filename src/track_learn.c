@@ -14,7 +14,7 @@
 #include "wifi_cmd.h"
 
 #include <zephyr/kernel.h>
-#include <zephyr/fs/nvs.h>
+#include <zephyr/kvss/nvs.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
 #include <string.h>

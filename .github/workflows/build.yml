@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  ZEPHYR_VERSION: v4.3.0
+  ZEPHYR_VERSION: v4.4.0
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
