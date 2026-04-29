@@ -20,7 +20,6 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/display/cfb.h>
 #include <zephyr/logging/log.h>
@@ -31,15 +30,13 @@
 LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 
 /* ─── Thread config ──────────────────────────────────────────────────────── */
-#define DISPLAY_STACK_SIZE   2048
+#define DISPLAY_STACK_SIZE   4096
 #define DISPLAY_PRIORITY     8
 #define DISPLAY_REFRESH_MS   120
 #define INACTIVITY_MS        10000
 
-#if 0 /* enabled with display thread below */
 static K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
 static struct k_thread display_thread_data;
-#endif
 
 /* ─── I2C0 bus mutex (shared with IMU) ───────────────────────────────────── */
 K_MUTEX_DEFINE(i2c0_mutex);
@@ -51,8 +48,7 @@ K_MSGQ_DEFINE(menu_cmd_q, sizeof(uint8_t), 4, 4);
 static volatile bool car_is_running;
 static volatile bool test_is_active;
 
-/* ─── Display menu system (disabled until hardware wired) ────────────────── */
-#if 0
+/* ─── Display menu system ────────────────────────────────────────────────── */
 
 /* ─── Wake event ─────────────────────────────────────────────────────────── */
 static K_EVENT_DEFINE(display_event);
@@ -512,7 +508,7 @@ static void draw_info(void)
 	snprintf(lines[count++], 22, "Loop: %dms Enc: %d", cfg.loop_ms, cfg.encoder_holes);
 
 	int64_t secs = k_uptime_get() / 1000;
-	snprintf(lines[count++], 22, "Up: %lldm %llds", secs / 60, secs % 60);
+	snprintf(lines[count++], 22, "Up: %dm %ds", (int)(secs / 60), (int)(secs % 60));
 
 	/* Clamp scroll */
 	if (info_scroll > count - INFO_VISIBLE) info_scroll = count - INFO_VISIBLE;
@@ -810,70 +806,26 @@ static void display_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	/* I2C0 raw diagnostics */
-	const struct device *i2c0 = DEVICE_DT_GET(DT_NODELABEL(i2c0));
-	if (device_is_ready(i2c0)) {
-		/* Try raw I2C command to SSD1306: display off */
-		uint8_t cmd_off[] = {0x00, 0xAE};
-		int rc = i2c_write(i2c0, cmd_off, sizeof(cmd_off), 0x3C);
-		wifi_cmd_printf("$L:I2C0 raw write to 0x3C: rc=%d\n", rc);
-
-		/* Try display on */
-		uint8_t cmd_on[] = {0x00, 0xAF};
-		rc = i2c_write(i2c0, cmd_on, sizeof(cmd_on), 0x3C);
-		wifi_cmd_printf("$L:I2C0 display-on cmd: rc=%d\n", rc);
-	} else {
-		wifi_cmd_printf("$L:I2C0 bus not ready!\n");
-	}
+	/* Let all drivers and threads settle before touching the I2C bus */
+	k_msleep(500);
 
 	oled_dev = DEVICE_DT_GET(DT_NODELABEL(ssd1306));
-	wifi_cmd_printf("$L:OLED device_is_ready=%d\n", device_is_ready(oled_dev));
+	LOG_INF("SSD1306 device_is_ready=%d", device_is_ready(oled_dev));
 	if (!device_is_ready(oled_dev)) {
-		LOG_ERR("SSD1306 not ready");
-		wifi_cmd_printf("$L:OLED not ready! Trying manual init...\n");
-
-		/* Try full SSD1306 init sequence manually */
-		uint8_t init_cmds[] = {
-			0x00,  /* Co=0, D/C#=0 (command stream) */
-			0xAE,  /* display off */
-			0xD5, 0x80,  /* clock divide ratio */
-			0xA8, 0x3F,  /* multiplex ratio = 63 */
-			0xD3, 0x00,  /* display offset = 0 */
-			0x40,        /* start line = 0 */
-			0x8D, 0x14,  /* charge pump ON */
-			0x20, 0x00,  /* horizontal addressing mode */
-			0xA1,        /* segment remap */
-			0xC8,        /* COM output scan direction */
-			0xDA, 0x12,  /* COM pins config: alternative */
-			0x81, 0xCF,  /* contrast */
-			0xD9, 0x22,  /* precharge period */
-			0xDB, 0x40,  /* VCOM deselect level */
-			0xA4,        /* display from RAM */
-			0xA6,        /* normal display */
-			0xAF,        /* display ON */
-		};
-		int rc2 = i2c_write(i2c0, init_cmds, sizeof(init_cmds), 0x3C);
-		wifi_cmd_printf("$L:Manual init: rc=%d\n", rc2);
-		if (rc2 == 0) {
-			wifi_cmd_printf("$L:Display should be ON now (manual)\n");
-		}
+		LOG_ERR("SSD1306 not ready — check GP18/GP20 wiring");
 		return;
 	}
 
-	k_mutex_lock(&i2c0_mutex, K_FOREVER);
 	int cfb_rc = cfb_framebuffer_init(oled_dev);
+	LOG_INF("CFB init rc=%d", cfb_rc);
 	if (cfb_rc) {
 		LOG_ERR("CFB init failed: %d", cfb_rc);
-		wifi_cmd_printf("$L:CFB init fail %d\n", cfb_rc);
-		k_mutex_unlock(&i2c0_mutex);
 		return;
 	}
 	display_blanking_on(oled_dev);  /* start blanked (OFF) */
-	k_mutex_unlock(&i2c0_mutex);
 
-	cfb_framebuffer_set_font(oled_dev, 0);  /* default 6x8 */
-	LOG_INF("OLED display ready (128x64, off by default)");
-	wifi_cmd_printf("$L:OLED ready, waiting for double-click\n");
+	cfb_framebuffer_set_font(oled_dev, 0);
+	LOG_INF("OLED ready — double-click encoder to wake");
 
 	while (1) {
 		/* ── SLEEP: wait for wake event ─────────────────────────── */
@@ -881,17 +833,11 @@ static void display_thread(void *p1, void *p2, void *p3)
 
 		/* Don't wake if car is running or test active */
 		if (car_is_running || test_is_active) {
-			wifi_cmd_printf("$L:OLED wake blocked (run=%d test=%d)\n",
-					car_is_running, test_is_active);
 			continue;
 		}
 
-		wifi_cmd_printf("$L:OLED waking up!\n");
-
 		/* Wake: turn on display */
-		k_mutex_lock(&i2c0_mutex, K_FOREVER);
 		display_blanking_off(oled_dev);
-		k_mutex_unlock(&i2c0_mutex);
 
 		cur_scr = SCR_DASHBOARD;
 		sel = 0;
@@ -915,18 +861,14 @@ static void display_thread(void *p1, void *p2, void *p3)
 			draw_current_screen();
 
 			/* Transfer to display (I2C) */
-			k_mutex_lock(&i2c0_mutex, K_FOREVER);
 			cfb_framebuffer_finalize(oled_dev);
-			k_mutex_unlock(&i2c0_mutex);
 
 			k_msleep(DISPLAY_REFRESH_MS);
 		}
 
 		/* ── Go to sleep: blank display ─────────────────────────── */
-		k_mutex_lock(&i2c0_mutex, K_FOREVER);
 		cfb_framebuffer_clear(oled_dev, true);
 		display_blanking_on(oled_dev);
-		k_mutex_unlock(&i2c0_mutex);
 	}
 }
 
@@ -942,38 +884,38 @@ static void enc_watch_handler(struct k_work *work)
 	int rot;
 	uint8_t ev = encoder_poll(&rot);
 
-	if (ev) {
-		wifi_cmd_printf("$L:ENC ev=0x%02x rot=%d\n", ev, rot);
+	/* Periodic OLED status (every ~5s = every 100th 50ms tick) */
+	static uint8_t tick;
+	if (++tick >= 100) {
+		tick = 0;
+		LOG_INF("OLED status: dev=%p ready=%d",
+			(void *)oled_dev, oled_dev ? device_is_ready(oled_dev) : -1);
 	}
 
-	if (ev & ENC_EVT_DOUBLE) {
-		wifi_cmd_printf("$L:ENC double-click! waking display\n");
+	if (ev) {
+		LOG_INF("ENC ev=0x%02x rot=%d", ev, rot);
+	}
+	if (ev & (ENC_EVT_DOUBLE | ENC_EVT_CLICK)) {
+		LOG_INF("ENC wake — posting (oled_dev=%p ready=%d)",
+			(void *)oled_dev, oled_dev ? device_is_ready(oled_dev) : -1);
 		k_event_post(&display_event, EVT_WAKE);
 	}
 
 	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 }
-#endif /* display thread + enc_watch disabled */
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
 
 void display_init(void)
 {
-	/* Display functionality disabled — only verify hardware is reachable.
-	 * Uncomment thread creation when ready to enable full menu. */
-	LOG_INF("Display module disabled (hardware check only)");
-
-#if 0  /* Enable when display is verified working */
 	k_thread_create(&display_thread_data, display_stack,
 			K_THREAD_STACK_SIZEOF(display_stack),
 			display_thread, NULL, NULL, NULL,
 			DISPLAY_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&display_thread_data, "display");
 
-	/* Start encoder watcher for double-click wake detection */
 	k_work_init_delayable(&enc_watch_work, enc_watch_handler);
 	k_work_reschedule(&enc_watch_work, K_MSEC(50));
-#endif
 }
 
 void display_notify_run_state(bool running)
