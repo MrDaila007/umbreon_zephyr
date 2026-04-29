@@ -40,8 +40,8 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 /* ─── Thread config ──────────────────────────────────────────────────────── */
 #define DISPLAY_STACK_SIZE   4096
 #define DISPLAY_PRIORITY     8
-#define DISPLAY_REFRESH_MS   120
-#define INACTIVITY_MS        10000
+#define DISPLAY_REFRESH_MS   120  /* dashboard: ~8 FPS, sensor bars don't need more */
+#define DISPLAY_MENU_MS       50  /* menus: fast encoder response */
 
 static K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
 static struct k_thread display_thread_data;
@@ -56,13 +56,8 @@ K_MSGQ_DEFINE(menu_cmd_q, sizeof(uint8_t), 4, 4);
 static volatile bool car_is_running;
 static volatile bool test_is_active;
 
-/* ─── Wake event ─────────────────────────────────────────────────────────── */
-static K_EVENT_DEFINE(display_event);
-#define EVT_WAKE BIT(0)
-
 /* ─── Navigation state ───────────────────────────────────────────────────── */
 static struct ui_state st;
-static int64_t last_activity;
 
 /* ─── Parameter descriptor table ────────────────────────────────────────── */
 #define P_OFF(field) offsetof(struct car_settings, field)
@@ -258,9 +253,6 @@ static void handle_input(void)
 	bool fast  = events & ENC_EVT_FAST;
 	int dir = rot;
 
-	if (events || dir) {
-		last_activity = k_uptime_get();
-	}
 
 	if (held) {
 		if (st.cur_scr == SCR_SETTINGS_EDIT) {
@@ -275,7 +267,9 @@ static void handle_input(void)
 
 	switch (st.cur_scr) {
 	case SCR_DASHBOARD:
+#if !IS_ENABLED(CONFIG_DISPLAY_DASHBOARD_ONLY)
 		if (click) go_screen(SCR_MAIN_MENU);
+#endif
 		break;
 
 	case SCR_MAIN_MENU:
@@ -448,55 +442,43 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 		LOG_ERR("display HAL init failed — thread exiting");
 		return;
 	}
-	LOG_INF("Display ready — double-click encoder to wake");
+
+	u8g2_SetPowerSave(&u8g2, 0); /* display always on at boot */
+	st.cur_scr = SCR_DASHBOARD;
+	bool disp_on = true;
+
+	LOG_INF("Display ready");
 
 	while (1) {
-		k_event_wait(&display_event, EVT_WAKE, true, K_FOREVER);
+		bool running = car_is_running || test_is_active;
 
-		if (car_is_running || test_is_active) {
-			continue;
+		if (running && disp_on) {
+			/* Car started — blank and sleep display */
+			u8g2_ClearBuffer(&u8g2);
+			u8g2_SendBuffer(&u8g2);
+			u8g2_SetPowerSave(&u8g2, 1);
+			disp_on = false;
+		} else if (!running && !disp_on) {
+			/* Car stopped — wake display, back to dashboard */
+			u8g2_SetPowerSave(&u8g2, 0);
+			st.cur_scr = SCR_DASHBOARD;
+			st.sel     = 0;
+			st.scroll  = 0;
+			disp_on = true;
 		}
 
-		u8g2_SetPowerSave(&u8g2, 0); /* display ON */
-
-		st.cur_scr   = SCR_DASHBOARD;
-		st.sel       = 0;
-		st.scroll    = 0;
-		last_activity = k_uptime_get();
-
-		while (1) {
-			if (car_is_running || test_is_active) break;
-			if ((k_uptime_get() - last_activity) > INACTIVITY_MS) break;
-
+		if (!running) {
 			handle_input();
-
 			u8g2_ClearBuffer(&u8g2);
 			draw_current_screen(); /* calls u8g2_SendBuffer() */
 
-			k_msleep(DISPLAY_REFRESH_MS);
+			int ms = (st.cur_scr == SCR_DASHBOARD)
+				? DISPLAY_REFRESH_MS : DISPLAY_MENU_MS;
+			k_msleep(ms);
+		} else {
+			k_msleep(100); /* low-rate poll while car runs */
 		}
-
-		/* Blank display before sleeping */
-		u8g2_ClearBuffer(&u8g2);
-		u8g2_SendBuffer(&u8g2);
-		u8g2_SetPowerSave(&u8g2, 1); /* display OFF */
 	}
-}
-
-/* ─── Encoder double-click watcher ──────────────────────────────────────── */
-
-static struct k_work_delayable enc_watch_work;
-
-static void enc_watch_handler(struct k_work *work)
-{
-	int rot;
-	uint8_t ev = encoder_poll(&rot);
-
-	if (ev & (ENC_EVT_DOUBLE | ENC_EVT_CLICK)) {
-		k_event_post(&display_event, EVT_WAKE);
-	}
-
-	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 }
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
@@ -508,9 +490,6 @@ void display_init(void)
 			display_thread_fn, NULL, NULL, NULL,
 			DISPLAY_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&display_thread_data, "display");
-
-	k_work_init_delayable(&enc_watch_work, enc_watch_handler);
-	k_work_reschedule(&enc_watch_work, K_MSEC(50));
 }
 
 void display_notify_run_state(bool running)

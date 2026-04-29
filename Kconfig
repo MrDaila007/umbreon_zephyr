@@ -1,0 +1,10 @@
+source "Kconfig.zephyr"
+
+config DISPLAY_DASHBOARD_ONLY
+	bool "Dashboard-only display mode"
+	default n
+	help
+	  When enabled, the display shows only the dashboard screen.
+	  The main menu, settings, tests and actions are inaccessible.
+	  Useful for competition builds where accidental menu entry must
+	  be prevented.
