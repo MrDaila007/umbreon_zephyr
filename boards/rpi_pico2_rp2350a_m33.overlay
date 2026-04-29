@@ -123,6 +123,9 @@
 		status = "okay";
 	};
 
+	/* SSD1306 node disabled — u8g2 communicates directly via I2C, bypassing
+	 * the Zephyr display subsystem. I2C address 0x3C is still used by u8g2
+	 * HAL callbacks. Do not re-enable without removing CONFIG_U8G2=y. */
 	ssd1306: ssd1306@3c {
 		compatible = "solomon,ssd1306";
 		reg = <0x3c>;
@@ -136,6 +139,7 @@
 		com-invdir;
 		prechargep = <0x22>;
 		ready-time-ms = <200>;
+		status = "disabled";
 	};
 };
 

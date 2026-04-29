@@ -11,3 +11,6 @@ __pycache__/
 tests/test_unit
 tests/test_maneuver
 tz_web_stall_param.md
+
+# u8g2 source (cloned separately — not tracked in this repo)
+modules/u8g2/

@@ -11,9 +11,10 @@ if(HIL_NO_SENSORS)
   list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/hil_no_sensors.overlay)
 endif()
 
-# Register out-of-tree VL53L0X enhanced driver module
+# Register out-of-tree modules
 list(APPEND ZEPHYR_EXTRA_MODULES
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/vl53l0x_enhanced
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/u8g2_zephyr
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
@@ -34,4 +35,13 @@ target_sources(app PRIVATE
     src/track_learn.c
     src/encoder.c
     src/display.c
+    src/display_hal.c
+    src/screens/screen_dashboard.c
+    src/screens/screen_menu.c
+    src/screens/screen_settings.c
+    src/screens/screen_edit.c
+    src/screens/screen_tests.c
+    src/screens/screen_actions.c
+    src/screens/screen_confirm.c
+    src/screens/screen_info.c
 )
