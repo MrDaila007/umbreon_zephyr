@@ -145,6 +145,7 @@
 	mpu6050: mpu6050@68 {
 		compatible = "invensense,mpu6050";
 		reg = <0x68>;
+		gyro-fs = <500>;
 		status = "okay";
 	};
 

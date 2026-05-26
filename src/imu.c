@@ -44,14 +44,6 @@ void imu_init(void)
 		return;
 	}
 
-	/* Set gyro full-scale to ±500°/s */
-	struct sensor_value fs = { .val1 = 500, .val2 = 0 };
-	int rc = sensor_attr_set(mpu_dev, SENSOR_CHAN_GYRO_Z,
-				 SENSOR_ATTR_FULL_SCALE, &fs);
-	if (rc) {
-		LOG_WRN("MPU-6050 gyro FS set failed: %d (using driver default)", rc);
-	}
-
 	mpu_ok = true;
 	prev_us = k_ticks_to_us_floor64(k_uptime_ticks());
 	LOG_INF("MPU-6050 init OK");

@@ -15,14 +15,24 @@ Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |
 | Battery | ADC ch0 | GP26 (18k/10k divider) |
+| OLED SSD1306 128x64 | bit-bang I2C | SDA=GP18, SCL=GP20 |
+| Menu encoder | GPIO active low | CLK=GP22, DT=GP12, button=GP19 |
 
 ### Sensor Layout
 
-```
-        [1:FR]  [4:FL]
-  [0:HR]                [5:HL]
-        [2:R]   [3:L]
-      ────── FRONT ──────
+```text
+             REAR
+
+      [0 HR]           [5 HL]
+      Hard-Right       Hard-Left
+
+          [1 FR]   [4 FL]
+          Front-R  Front-L
+
+          [2 R]    [3 L]
+          Right    Left
+
+            FRONT
 ```
 
 ## Getting Started (from scratch)
