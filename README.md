@@ -10,7 +10,7 @@ Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 | 6x VL53L0X ToF | I2C1 100kHz | SDA=GP2, SCL=GP3, XSHUT=GP6-9,14,15 |
 | MPU-6050 IMU | I2C0 400kHz | SDA=GP0, SCL=GP1 |
 | ESP8266 WiFi | UART1 115200 | TX=GP4, RX=GP5 |
-| Debug console | UART0 115200 | TX=GP16, RX=GP17 |
+| Debug console / commands | UART0 115200 | TX=GP16, RX=GP17 |
 | Servo (steering) | PWM slice 5A | GP10 |
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |

@@ -5,9 +5,10 @@
  *
  * Architecture:
  *   - UART1 (GP4/GP5) IRQ callback fills a ring buffer
+ *   - UART0 (GP16/GP17) polling RX accepts the same $ commands for debug
  *   - Dedicated thread wakes on '\n', parses command, dispatches
  *   - Commands that affect control loop are sent via k_msgq
- *   - UART0 (GP16/GP17) is free for debug console / LOG output
+ *   - UART0 (GP16/GP17) remains the debug console / LOG output
  *
  * Debug console commands ($LOG, $SNS, $IMU, $PID, $SYS, $DIAG, $HELP)
  */
@@ -35,8 +36,9 @@
 
 LOG_MODULE_REGISTER(wifi_cmd, LOG_LEVEL_INF);
 
-/* ─── UART device ─────────────────────────────────────────────────────────── */
+/* ─── UART devices ────────────────────────────────────────────────────────── */
 static const struct device *uart_dev;
+static const struct device *debug_uart_dev;
 
 /* ─── Ring buffer for UART RX ─────────────────────────────────────────────── */
 #define RX_BUF_SIZE 512
@@ -73,6 +75,15 @@ static volatile bool log_on;
 #define WIFI_PRIORITY   5
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
+
+#define DEBUG_UART_STACK_SIZE 1024
+#define DEBUG_UART_PRIORITY   7
+static K_THREAD_STACK_DEFINE(debug_uart_stack, DEBUG_UART_STACK_SIZE);
+static struct k_thread debug_uart_thread_data;
+
+static K_MUTEX_DEFINE(debug_uart_tx_mutex);
+
+static void dispatch_command(const char *line);
 
 /* After loading/resetting config, sync the tach glitch filter with the
  * (potentially changed) setting value. */
@@ -154,8 +165,23 @@ static inline uint16_t tx_free(void)
 	return (t > h) ? (t - h - 1) : (TX_BUF_SIZE - h + t - 1);
 }
 
+static void debug_uart_send(const char *str)
+{
+	if (!debug_uart_dev) {
+		return;
+	}
+
+	k_mutex_lock(&debug_uart_tx_mutex, K_FOREVER);
+	for (const char *p = str; *p; p++) {
+		uart_poll_out(debug_uart_dev, (unsigned char)*p);
+	}
+	k_mutex_unlock(&debug_uart_tx_mutex);
+}
+
 void wifi_cmd_send(const char *str)
 {
+	debug_uart_send(str);
+
 	if (!uart_dev) {
 		return;
 	}
@@ -229,6 +255,38 @@ void wifi_log(const char *fmt, ...)
 bool wifi_log_enabled(void)
 {
 	return log_on;
+}
+
+static void debug_uart_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	char line[CMD_BUF_SIZE];
+	int len = 0;
+
+	while (1) {
+		unsigned char c;
+		if (uart_poll_in(debug_uart_dev, &c) != 0) {
+			k_msleep(5);
+			continue;
+		}
+
+		if (c == '\n' || c == '\r') {
+			if (len > 0) {
+				line[len] = '\0';
+				if (line[0] == '$') {
+					dispatch_command(line);
+				}
+				len = 0;
+			}
+		} else if (len < (int)sizeof(line) - 1) {
+			line[len++] = (char)c;
+		} else {
+			len = 0;
+		}
+	}
 }
 
 /* ─── Ring buffer helpers ─────────────────────────────────────────────────── */
@@ -723,6 +781,12 @@ void wifi_cmd_init(void)
 		return;
 	}
 
+	debug_uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+	if (!device_is_ready(debug_uart_dev)) {
+		LOG_WRN("UART0 debug command RX not ready");
+		debug_uart_dev = NULL;
+	}
+
 	uart_irq_callback_set(uart_dev, uart_isr);
 	uart_irq_rx_enable(uart_dev);
 
@@ -738,5 +802,13 @@ void wifi_cmd_init(void)
 			WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_async_thread_data, "wifi_async");
 
-	LOG_INF("WiFi CMD init (UART1 GP4/GP5, 115200)");
+	if (debug_uart_dev) {
+		k_thread_create(&debug_uart_thread_data, debug_uart_stack,
+				K_THREAD_STACK_SIZEOF(debug_uart_stack),
+				debug_uart_thread, NULL, NULL, NULL,
+				DEBUG_UART_PRIORITY, 0, K_NO_WAIT);
+		k_thread_name_set(&debug_uart_thread_data, "debug_uart_cmd");
+	}
+
+	LOG_INF("WiFi CMD init (UART1 GP4/GP5 + UART0 GP16/GP17 debug, 115200)");
 }

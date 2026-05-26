@@ -2,10 +2,11 @@
 
 ## Transport
 
-- Physical: UART0 at 115200 baud (GP16 TX, GP17 RX)
-- Bridge: ESP8266 with custom firmware (transparent serial-to-WiFi)
+- Primary physical link: UART1 at 115200 baud (GP4 TX, GP5 RX)
+- Debug physical link: UART0 at 115200 baud (GP16 TX, GP17 RX)
+- Bridge: ESP8266 with custom firmware on UART1 (transparent serial-to-WiFi)
 - Format: ASCII, prefix `$`, terminator `\n`
-- Responses use the same format
+- Responses use the same format and are mirrored to the debug UART
 
 ## Command Reference
 
