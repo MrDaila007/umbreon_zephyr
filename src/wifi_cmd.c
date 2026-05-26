@@ -76,7 +76,7 @@ static volatile bool log_on;
 static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
-#define DEBUG_UART_STACK_SIZE 1024
+#define DEBUG_UART_STACK_SIZE 4096
 #define DEBUG_UART_PRIORITY   7
 static K_THREAD_STACK_DEFINE(debug_uart_stack, DEBUG_UART_STACK_SIZE);
 static struct k_thread debug_uart_thread_data;

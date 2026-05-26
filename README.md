@@ -203,6 +203,42 @@ Dashboard endpoint selection:
 - connect dashboard to `127.0.0.1:8023` for real stream
 - connect dashboard to `127.0.0.1:8123` for sim stream (or use second dashboard instance)
 
+### HIL health tests on real hardware
+
+`tools/hil_runner.py` drives the firmware command UART and fails with non-zero
+exit if it sees reboot/fault markers, timestamp rollback, too many telemetry
+gaps, low battery, or impossible tachometer speed spikes.
+
+Safe smoke test (no motor):
+
+```bash
+make hil-smoke PROBE_UART=/dev/ttyACM0
+```
+
+Five-minute RUN endurance test:
+
+```bash
+make hil-endurance PROBE_UART=/dev/ttyACM0 HIL_DURATION=300
+```
+
+Bench motor test (wheels must be lifted):
+
+```bash
+make hil-motor PROBE_UART=/dev/ttyACM0
+```
+
+Logs are written to `/tmp` by default:
+
+- `/tmp/umbreon_hil_smoke.log`, `/tmp/umbreon_hil_smoke.json`
+- `/tmp/umbreon_hil_endurance.log`, `/tmp/umbreon_hil_endurance.json`
+- `/tmp/umbreon_hil_motor.log`, `/tmp/umbreon_hil_motor.json`
+
+Useful overrides:
+
+```bash
+make hil-endurance HIL_LOG_DIR=./hil-logs HIL_TGF=500 HIL_DURATION=600
+```
+
 ### Monitor serial console
 
 ```bash
@@ -237,6 +273,9 @@ make test-ztest             # Zephyr ztest on native_sim
 | `make hil-real` | Run bridge: dashboard <-> UART (RP2350) |
 | `make hil-sim` | Run sim + bridge endpoint for dashboard |
 | `make hil-dual` | Run real + sim endpoints in one bridge process |
+| `make hil-smoke` | Safe real-hardware command/telemetry smoke test |
+| `make hil-endurance` | RUN endurance test with reboot/fault detection |
+| `make hil-motor` | Bench motor HIL test (requires lifted wheels) |
 
 ## Architecture
 

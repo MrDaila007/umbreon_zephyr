@@ -19,10 +19,13 @@ HIL_REAL_PORT ?= 8023
 HIL_SIM_PORT ?= 8123
 HIL_SERIAL_PORT ?= /dev/ttyUSB0
 HIL_SERIAL_BAUD ?= 115200
+HIL_LOG_DIR ?= /tmp
+HIL_DURATION ?= 300
+HIL_TGF ?= 500
 SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 
 .PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
-	hil-deps hil-real hil-sim hil-dual
+	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor
 
 setup:
 	./setup_zephyr.sh $(ZEPHYR_DIR)
@@ -94,3 +97,26 @@ hil-dual:
 	SERIAL_PORT=$(HIL_SERIAL_PORT) SERIAL_BAUD=$(HIL_SERIAL_BAUD) \
 	SIM_HOST=$(HIL_HOST) SIM_PORT=$(HIL_REAL_PORT) \
 	bash tools/run_hil_dual.sh
+
+hil-smoke:
+	$(PYTHON_BIN) tools/hil_runner.py --profile smoke \
+		--serial-port $(PROBE_UART) --baud $(BAUD) \
+		--raw-log $(HIL_LOG_DIR)/umbreon_hil_smoke.log \
+		--summary $(HIL_LOG_DIR)/umbreon_hil_smoke.json \
+		--max-speed 6.0
+
+hil-endurance:
+	$(PYTHON_BIN) tools/hil_runner.py --profile endurance \
+		--serial-port $(PROBE_UART) --baud $(BAUD) \
+		--duration $(HIL_DURATION) --set-battery --tgf $(HIL_TGF) \
+		--raw-log $(HIL_LOG_DIR)/umbreon_hil_endurance.log \
+		--summary $(HIL_LOG_DIR)/umbreon_hil_endurance.json \
+		--max-speed 6.0
+
+hil-motor:
+	$(PYTHON_BIN) tools/hil_runner.py --profile motor --allow-motor \
+		--serial-port $(PROBE_UART) --baud $(BAUD) \
+		--tgf $(HIL_TGF) \
+		--raw-log $(HIL_LOG_DIR)/umbreon_hil_motor.log \
+		--summary $(HIL_LOG_DIR)/umbreon_hil_motor.json \
+		--max-speed 6.0
