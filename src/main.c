@@ -8,6 +8,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/hwinfo.h>
 
 #if defined(CONFIG_USB_DEVICE_STACK)
 #include <zephyr/usb/usb_device.h>
@@ -126,6 +127,11 @@ int main(void)
 	printk("  Umbreon Zephyr v%s\n", FW_VERSION);
 	printk("==============================\n");
 
+	/* Read reset reason early; report it after WiFi is up */
+	uint32_t reset_cause = 0;
+	hwinfo_get_reset_cause(&reset_cause);
+	hwinfo_clear_reset_cause();
+
 	/* Load saved settings (falls back to compile-time defaults) */
 	settings_init();
 	settings_load();
@@ -149,8 +155,16 @@ int main(void)
 
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */
-	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s\n",
-			sensors_online_count(), FW_VERSION);
+
+	const char *reset_str = "UNK";
+	if (reset_cause & RESET_WATCHDOG) reset_str = "WDT";
+	else if (reset_cause & RESET_BROWNOUT) reset_str = "BROWNOUT";
+	else if (reset_cause & RESET_SOFTWARE) reset_str = "SW";
+	else if (reset_cause & RESET_PIN)      reset_str = "PIN";
+	else if (reset_cause & RESET_POR)      reset_str = "POR";
+
+	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s,RST=%s\n",
+			sensors_online_count(), FW_VERSION, reset_str);
 
 	/* ESC calibration on first boot */
 	wdt_feed_kick();

@@ -6,11 +6,13 @@ BUILD_DIR    ?= $(ZEPHYR_DIR)/build
 SRC_DIR      ?= $(CURDIR)
 MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
+PROBE_UART   ?= /dev/ttyACM0
 UART0_PORT   ?= /dev/ttyUSB0
 BAUD         ?= 115200
 OPENOCD      ?= openocd
-OPENOCD_IFACE ?= interface/stlink.cfg
+OPENOCD_IFACE ?= interface/cmsis-dap.cfg
 OPENOCD_TARGET ?= target/rp2350.cfg
+OPENOCD_SPEED ?= 5000
 PYTHON_BIN   ?= python3
 HIL_HOST     ?= 127.0.0.1
 HIL_REAL_PORT ?= 8023
@@ -19,7 +21,7 @@ HIL_SERIAL_PORT ?= /dev/ttyUSB0
 HIL_SERIAL_BAUD ?= 115200
 SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 
-.PHONY: setup build build-usb build-hil flash flash-stlink monitor monitor-uart0 clean test test-host test-ztest \
+.PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
 	hil-deps hil-real hil-sim hil-dual
 
 setup:
@@ -43,15 +45,23 @@ build-hil:
 flash:
 	cp $(BUILD_DIR)/zephyr/zephyr.uf2 $(MOUNT_POINT)/
 
-flash-stlink:
+flash-probe:
 	$(OPENOCD) -f $(OPENOCD_IFACE) -f $(OPENOCD_TARGET) \
+	-c "adapter speed $(OPENOCD_SPEED)" \
+	-c "program $(BUILD_DIR)/zephyr/zephyr.elf verify reset exit"
+
+flash-stlink:
+	$(OPENOCD) -f interface/stlink.cfg -f $(OPENOCD_TARGET) \
 	-c "program $(BUILD_DIR)/zephyr/zephyr.elf verify reset exit"
 
 monitor:
-	picocom $(SERIAL_PORT) -b $(BAUD)
+	minicom -D $(SERIAL_PORT) -b $(BAUD)
+
+monitor-probe:
+	minicom -D $(PROBE_UART) -b $(BAUD)
 
 monitor-uart0:
-	picocom $(UART0_PORT) -b $(BAUD)
+	minicom -D $(UART0_PORT) -b $(BAUD)
 
 test:
 	$(MAKE) -C tests test
