@@ -51,6 +51,9 @@ enum sensor_attribute_vl53l0x {
 	/** Crosstalk compensation rate in FixPoint16.16 MCPS (val1 = value).
 	 *  Setting a non-zero value enables crosstalk compensation. */
 	SENSOR_ATTR_VL53L0X_XTALK_RATE,
+
+	/** Hardware-reset and reinitialize the sensor via XSHUT. */
+	SENSOR_ATTR_VL53L0X_RESTART,
 };
 
 /* ─── Measurement modes ──────────────────────────────────────────────────── */

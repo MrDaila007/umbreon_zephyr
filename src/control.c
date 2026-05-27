@@ -66,6 +66,7 @@ enum run_substate {
 	RUN_REVERSE    = 3,
 	RUN_WRONG_DIR  = 4,
 	RUN_STALL      = 5,
+	RUN_SENSOR_RECOVERY = 6,
 };
 static volatile int run_state;
 static int run_telem_div;
@@ -305,6 +306,33 @@ static void send_idle_telemetry(void)
 	send_telemetry(s, 0, 0.0f);
 }
 
+static bool recover_sensors_while_stopped(void)
+{
+	run_state = RUN_SENSOR_RECOVERY;
+	car_write_speed(0);
+	car_write_speed_ms(0.0f);
+	car_pid_reset();
+	car_write_steer(0);
+	mnv = MNV_NONE;
+	stuck_time = 0;
+	stall_time = 0;
+
+	send_run_state(RUN_SENSOR_RECOVERY, 0, turns, 0, 0);
+	wifi_cmd_send("$T:SNS,phase=recovery_start\n");
+
+	bool ok = sensors_recover_all();
+
+	wifi_cmd_printf("$T:SNS,phase=recovery_done,ok=%d,online=%d,restarts=%u\n",
+			ok ? 1 : 0,
+			sensors_online_count(),
+			(unsigned int)sensors_restart_count());
+
+	int *s = sensors_poll();
+	imu_update();
+	send_telemetry(s, 0, 0.0f);
+	return ok;
+}
+
 /* ─── work() — main autonomous control ────────────────────────────────────── */
 /* Port from Umbreon_roborace.ino:1087-1240 */
 
@@ -318,6 +346,10 @@ static void work(const struct car_settings *c)
 	}
 
 	int *s = sensors_poll();
+	if (sensors_recovery_needed()) {
+		(void)recover_sensors_while_stopped();
+		return;
+	}
 	imu_update();
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
@@ -544,6 +576,8 @@ static void control_thread(void *p1, void *p2, void *p3)
 		} else if (monitor_mode && !running) {
 			/* Diagnostic monitor mode */
 			work_monitor();
+		} else if (running && sensors_recovery_needed()) {
+			(void)recover_sensors_while_stopped();
 		} else if (running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;

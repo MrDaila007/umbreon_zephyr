@@ -135,7 +135,7 @@ $RUN:<state>,<stuck_time>,<turns>,<how_clear>,<diff>
 
 | Field | Type | Description |
 |-------|------|-------------|
-| state | 0–4 | 0=CLEAR, 1=BLOCKED, 2=STUCK_WAIT, 3=REVERSE, 4=WRONG_DIR |
+| state | 0–6 | 0=CLEAR, 1=BLOCKED, 2=STUCK_WAIT, 3=REVERSE, 4=WRONG_DIR, 5=STALL, 6=SENSOR_RECOVERY |
 | stuck_time | int | Stuck counter (cycles, threshold at `STK` setting) |
 | turns | float | Integrated heading change (°), triggers wrong-dir at `WDD` |
 | how_clear | 0–2 | Number of front sensors detecting an obstacle |

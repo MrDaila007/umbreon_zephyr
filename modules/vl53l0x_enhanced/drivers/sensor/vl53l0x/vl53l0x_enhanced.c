@@ -255,6 +255,43 @@ static int vl53l0x_enh_start(const struct device *dev)
 	return 0;
 }
 
+static int vl53l0x_enh_restart(const struct device *dev)
+{
+	const struct vl53l0x_enh_config *cfg = dev->config;
+	struct vl53l0x_enh_data *data = dev->data;
+	VL53L0X_DEV vl = &data->vl53l0x;
+	int r;
+
+	if (!cfg->xshut.port) {
+		return -ENOTSUP;
+	}
+
+	if (data->continuous_running) {
+		(void)VL53L0X_StopMeasurement(vl);
+	}
+
+	data->started = false;
+	data->continuous_running = false;
+	data->current_mode = VL53L0X_DEVICEMODE_SINGLE_RANGING;
+	vl->I2cDevAddr = VL53L0X_INITIAL_ADDR;
+
+	r = gpio_pin_configure_dt(&cfg->xshut, GPIO_OUTPUT_ACTIVE);
+	if (r < 0) {
+		LOG_ERR("[%s] XSHUT active failed: %d", dev->name, r);
+		return -EIO;
+	}
+	k_sleep(K_MSEC(5));
+
+	r = vl53l0x_enh_start(dev);
+	if (r < 0) {
+		LOG_ERR("[%s] restart failed: %d", dev->name, r);
+		return r;
+	}
+
+	LOG_WRN("[%s] restarted", dev->name);
+	return 0;
+}
+
 /* ─── Sensor API: sample_fetch ───────────────────────────────────────────── */
 
 static int vl53l0x_enh_sample_fetch(const struct device *dev,
@@ -374,7 +411,7 @@ static int vl53l0x_enh_attr_set(const struct device *dev,
 	VL53L0X_DEV vl = &data->vl53l0x;
 	VL53L0X_Error ret;
 
-	if (!data->started) {
+	if (!data->started && (int)attr != SENSOR_ATTR_VL53L0X_RESTART) {
 		return -ENODEV;
 	}
 
@@ -476,6 +513,9 @@ static int vl53l0x_enh_attr_set(const struct device *dev,
 			return -EIO;
 		}
 		break;
+
+	case SENSOR_ATTR_VL53L0X_RESTART:
+		return vl53l0x_enh_restart(dev);
 
 	default:
 		return -ENOTSUP;
