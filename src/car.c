@@ -23,6 +23,7 @@ LOG_MODULE_REGISTER(car, LOG_LEVEL_INF);
 /* ─── PWM devices ─────────────────────────────────────────────────────────── */
 static const struct pwm_dt_spec servo_pwm = PWM_DT_SPEC_GET(DT_NODELABEL(servo));
 static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
+static volatile int esc_last_us = NEUTRAL_SPEED;
 
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;
@@ -46,6 +47,7 @@ static inline void servo_set_us(int us)
 
 static inline void esc_set_us(int us)
 {
+	esc_last_us = us;
 	pwm_set_pulse_dt(&esc_pwm, PWM_USEC(us));
 }
 
@@ -137,6 +139,11 @@ void car_write_speed(int s)
 void car_write_speed_ms(float target)
 {
 	target_speed = target;
+}
+
+int car_get_esc_us(void)
+{
+	return esc_last_us;
 }
 
 /* ─── PID ─────────────────────────────────────────────────────────────────── */

@@ -85,6 +85,7 @@ static const struct gpio_dt_spec heartbeat_led =
 
 /* ─── Wall follow bias ────────────────────────────────────────────────────── */
 #define WALL_FOLLOW_BIAS 800
+#define STEER_CMD_LIMIT  1000
 
 /* ─── RUN sub-state message ───────────────────────────────────────────────── */
 
@@ -92,6 +93,48 @@ static void send_run_state(int state, int stuck, float trn, int how_clr, int dif
 {
 	wifi_cmd_printf("$RUN:%d,%d,%.1f,%d,%d\n",
 			state, stuck, (double)trn, how_clr, dif);
+}
+
+static int steer_distance(int d)
+{
+	if (d <= 0 || d > MAX_SENSOR_RANGE) {
+		return MAX_SENSOR_RANGE;
+	}
+	return d;
+}
+
+static int wall_follow_diff(const int *s, int side_open_dist, int all_close_dist)
+{
+	int left = steer_distance(s[IDX_LEFT]);
+	int right = steer_distance(s[IDX_RIGHT]);
+	int hard_left = steer_distance(s[IDX_HARD_LEFT]);
+	int hard_right = steer_distance(s[IDX_HARD_RIGHT]);
+	int diff;
+
+	if (left > side_open_dist && right > side_open_dist) {
+		diff = WALL_FOLLOW_BIAS;
+	} else {
+		diff = right - left;
+	}
+
+	bool all_close = true;
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		if (steer_distance(s[i]) >= all_close_dist) {
+			all_close = false;
+			break;
+		}
+	}
+	if (all_close) {
+		diff = WALL_FOLLOW_BIAS;
+	}
+
+	diff += (int)((hard_right - hard_left) * 0.25f);
+	return diff;
+}
+
+static int clamp_steer_cmd(int steer)
+{
+	return CLAMP(steer, -STEER_CMD_LIMIT, STEER_CMD_LIMIT);
 }
 
 /* ─── Maneuver state machine ─────────────────────────────────────────────── */
@@ -353,30 +396,9 @@ static void work(const struct car_settings *c)
 	imu_update();
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
-	int diff;
 	bool f_l = s[IDX_FRONT_LEFT]  < c->front_obstacle_dist;
 	bool f_r = s[IDX_FRONT_RIGHT] < c->front_obstacle_dist;
-
-	if (s[IDX_LEFT] > c->side_open_dist && s[IDX_RIGHT] > c->side_open_dist) {
-		diff = WALL_FOLLOW_BIAS;
-	} else {
-		diff = s[IDX_RIGHT] - s[IDX_LEFT];
-	}
-
-	/* All sensors close: hard turn */
-	bool all_close = true;
-	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (s[i] >= c->all_close_dist) {
-			all_close = false;
-			break;
-		}
-	}
-	if (all_close) {
-		diff = WALL_FOLLOW_BIAS;
-	}
-
-	/* Hard-side blend */
-	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
+	int diff = wall_follow_diff(s, c->side_open_dist, c->all_close_dist);
 
 	/* ── Speed ─────────────────────────────────────────────────────────── */
 	int how_clear = (int)f_l + (int)f_r;
@@ -397,15 +419,16 @@ static void work(const struct car_settings *c)
 			spd = rec;
 		}
 	}
-	track_learn_tick((int)(diff * coef), spd);
+	int steer_cmd = clamp_steer_cmd((int)(diff * coef));
+	track_learn_tick(steer_cmd, spd);
 
 	/* ── Actuation ─────────────────────────────────────────────────────── */
-	car_write_steer((int)(diff * coef));
+	car_write_steer(steer_cmd);
 	car_write_speed_ms(spd);
 	car_pid_control();
 
 	/* ── Telemetry ─────────────────────────────────────────────────────── */
-	send_telemetry(s, (int)(diff * coef), spd);
+	send_telemetry(s, steer_cmd, spd);
 
 	/* ── RUN sub-state telemetry ───────────────────────────────────────── */
 	int cur_state;
@@ -423,7 +446,7 @@ static void work(const struct car_settings *c)
 	if (++run_telem_div >= 5) {
 		run_telem_div = 0;
 		send_run_state(cur_state, stuck_time, turns,
-			       how_clear, (int)(diff * coef));
+			       how_clear, steer_cmd);
 	}
 
 	/* ── Stuck detection ───────────────────────────────────────────────── */
@@ -486,31 +509,9 @@ static void work_monitor(void)
 	int *s = sensors_poll();
 	imu_update();
 
-	/* ── Steering (same wall-follow logic as work()) ──────────────── */
-	int diff;
-
-	if (s[IDX_LEFT] > c.side_open_dist && s[IDX_RIGHT] > c.side_open_dist) {
-		diff = WALL_FOLLOW_BIAS;
-	} else {
-		diff = s[IDX_RIGHT] - s[IDX_LEFT];
-	}
-
-	bool all_close = true;
-	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (s[i] >= c.all_close_dist) {
-			all_close = false;
-			break;
-		}
-	}
-	if (all_close) {
-		diff = WALL_FOLLOW_BIAS;
-	}
-
-	/* Hard-side blend */
-	diff += (int)((s[IDX_HARD_RIGHT] - s[IDX_HARD_LEFT]) * 0.25f);
-
-	/* Use clear coefficients for steering */
-	int steer_val = (int)(diff * c.coe_clear);
+	/* Steering uses the same wall-follow logic as work(), but no motor. */
+	int diff = wall_follow_diff(s, c.side_open_dist, c.all_close_dist);
+	int steer_val = clamp_steer_cmd((int)(diff * c.coe_clear));
 	car_write_steer(steer_val);
 
 	/* No motor — no speed, no PID, no stuck/wrong-dir detection */
@@ -573,11 +574,11 @@ static void control_thread(void *p1, void *p2, void *p3)
 
 		if (countdown) {
 			/* Countdown owner sends idle telemetry to avoid double polling */
+		} else if (sensors_recovery_needed()) {
+			(void)recover_sensors_while_stopped();
 		} else if (monitor_mode && !running) {
 			/* Diagnostic monitor mode */
 			work_monitor();
-		} else if (running && sensors_recovery_needed()) {
-			(void)recover_sensors_while_stopped();
 		} else if (running && !drv_active) {
 			/* Autonomous mode */
 			manual_mode = false;

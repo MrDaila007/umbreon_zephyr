@@ -51,6 +51,7 @@ class Summary:
     statuses: list[dict] = field(default_factory=list)
     run_lines: int = 0
     battery_values: list[float] = field(default_factory=list)
+    power: list[dict] = field(default_factory=list)
     cfg: dict[str, str] = field(default_factory=dict)
     pid: list[dict] = field(default_factory=list)
     max_speed: float = 0.0
@@ -240,6 +241,11 @@ def analyze(lines: list[str], gap_ms: int) -> Summary:
                     summary.battery_values.append(v)
             except ValueError:
                 pass
+        elif line.startswith("$PWR:"):
+            fields = parse_key_values(line[5:])
+            if fields:
+                fields["line"] = str(line_no)
+                summary.power.append(fields)
         elif line.startswith("$CFG:"):
             summary.cfg.update(parse_key_values(line[5:]))
         elif line.startswith("$PID:"):
@@ -289,15 +295,17 @@ def send(link: Link, raw_log, command: str, mirror: bool) -> None:
     link.send_line(command)
 
 
-def should_stop_on_line(line: str, state: dict[str, bool]) -> bool:
+def should_stop_on_line(line: str, state: dict[str, bool]) -> str | None:
     if line.startswith("$STS:RUN") or line.startswith("$STS:STARTING"):
         state["active_seen"] = True
     elif line.startswith("$RUN:") or CSV_RE.match(line):
         state["active_seen"] = True
+    elif state.get("active_seen", False) and any(marker in line for marker in BOOT_MARKERS):
+        return f"robot rebooted: {line[:120]}"
     elif line.startswith("$STS:STOP") and state.get("active_seen", False):
         state["stop_seen"] = True
-        return True
-    return False
+        return "robot reported $STS:STOP"
+    return None
 
 
 def drain(
@@ -315,10 +323,10 @@ def drain(
             lines.append(line)
             if mirror:
                 print(line)
-            stopped = should_stop_on_line(line, state)
-            if stop_on_status and stopped:
+            stop_reason = should_stop_on_line(line, state)
+            if stop_on_status and stop_reason:
                 raw_log.flush()
-                raise StopLogging("robot reported $STS:STOP")
+                raise StopLogging(stop_reason)
     raw_log.flush()
 
 
@@ -350,6 +358,7 @@ def write_summary(path: Path, args, summary: Summary, raw_log: Path, stop_reason
             "run_lines": summary.run_lines,
             "battery_min": min(summary.battery_values) if summary.battery_values else None,
             "battery_max": max(summary.battery_values) if summary.battery_values else None,
+            "power_snapshots": summary.power[-60:],
             "cfg": summary.cfg,
             "pid_snapshots": summary.pid[-60:],
             "max_speed": summary.max_speed,
@@ -399,7 +408,7 @@ def main() -> int:
         link = TcpLink(args.host, port, args.connect_timeout) if args.transport == "tcp" else WebSocketLink(args.host, port, args.connect_timeout)
         with args.raw_log.open("w", encoding="utf-8", errors="replace") as raw_log:
             try:
-                for command in ("$GET", "$STATUS", "$BAT", "$PID", "$SYS", "$DIAG"):
+                for command in ("$GET", "$STATUS", "$BAT", "$PWR", "$PID", "$SYS", "$DIAG"):
                     send(link, raw_log, command, args.mirror)
                     drain(link, raw_log, lines, time.monotonic() + 0.35, args.mirror,
                           state, False)
@@ -422,6 +431,7 @@ def main() -> int:
                     if args.status_interval > 0 and now >= next_status:
                         send(link, raw_log, "$STATUS", args.mirror)
                         send(link, raw_log, "$BAT", args.mirror)
+                        send(link, raw_log, "$PWR", args.mirror)
                         next_status = now + args.status_interval
                     drain(link, raw_log, lines, min(end, now + 0.2), args.mirror,
                           state, not args.no_stop_on_status)

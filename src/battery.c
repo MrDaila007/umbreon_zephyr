@@ -33,9 +33,12 @@ static const struct adc_channel_cfg adc_ch_cfg = {
 };
 
 #define BAT_EMA 0.05f
+#define BAT_SAMPLE_MS 50
 
 /* ─── State ───────────────────────────────────────────────────────────────── */
 static volatile float bat_voltage;
+static volatile float bat_raw_voltage;
+static volatile float bat_min_voltage;
 
 /* ─── Thread config ───────────────────────────────────────────────────────── */
 #define BAT_STACK_SIZE 1024
@@ -60,7 +63,7 @@ static void battery_thread(void *p1, void *p2, void *p3)
 	};
 
 	while (1) {
-		k_msleep(500);
+		k_msleep(BAT_SAMPLE_MS);
 
 		struct car_settings c;
 		settings_get_copy(&c);
@@ -76,6 +79,10 @@ static void battery_thread(void *p1, void *p2, void *p3)
 
 		float v_adc = (float)sample_buf * (3.3f / 4095.0f);
 		float v_bat = v_adc * c.bat_multiplier;
+		bat_raw_voltage = v_bat;
+		if (bat_min_voltage < 0.1f || v_bat < bat_min_voltage) {
+			bat_min_voltage = v_bat;
+		}
 
 		/* EMA filter */
 		if (bat_voltage < 0.1f) {
@@ -116,4 +123,14 @@ void battery_init(void)
 float battery_get_voltage(void)
 {
 	return bat_voltage;
+}
+
+float battery_get_raw_voltage(void)
+{
+	return bat_raw_voltage;
+}
+
+float battery_get_min_voltage(void)
+{
+	return bat_min_voltage;
 }

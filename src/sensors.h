@@ -29,6 +29,11 @@ bool sensors_recover_all(void);
 /* Total automatic VL53L0X restarts since boot. */
 uint32_t sensors_restart_count(void);
 
+/* Probe expected VL53L0X I2C addresses.
+ * Bit0..5 map to 0x30..0x35; bit6 maps to default 0x29. */
+uint8_t sensors_i2c_scan_mask(void);
+int sensors_i2c_scan_count(void);
+
 /* Get pointer to last-polled distance array (6 values, cm×10).
  * Updated by sensors_poll() in control thread. Read-only. */
 const int *sensors_get_distances(void);

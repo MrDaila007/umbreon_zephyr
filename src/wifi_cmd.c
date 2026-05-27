@@ -515,16 +515,19 @@ static void cmd_drv(const char *args)
 static void cmd_diag(void)
 {
 	wifi_cmd_printf(
-		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f"
-		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,SNR=%u\n",
+		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f,BRAW=%.2f,BMIN=%.2f"
+		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,ESC=%d,SNR=%u\n",
 		sensors_online_count(),
 		imu_is_ok() ? 1 : 0,
 		k_uptime_get(),
 		(double)battery_get_voltage(),
+		(double)battery_get_raw_voltage(),
+		(double)battery_get_min_voltage(),
 		control_is_running() ? 1 : 0,
 		0, /* drv_enabled is static in control.c */
 		taho_get_count(),
 		(double)taho_get_speed(),
+		car_get_esc_us(),
 		(unsigned int)sensors_restart_count());
 }
 
@@ -552,12 +555,13 @@ static void cmd_pid(void)
 	settings_get_copy(&c);
 
 	wifi_cmd_printf("$PID:KP=%.4f,KI=%.4f,KD=%.4f"
-			",SPD=%.2f,TAHO=%u,TSPD=%.2f\n",
+			",SPD=%.2f,TAHO=%u,TSPD=%.2f,ESC=%d\n",
 			(double)c.pid_kp, (double)c.pid_ki,
 			(double)c.pid_kd,
 			(double)taho_get_speed(),
 			taho_get_count(),
-			(double)taho_get_speed());
+			(double)taho_get_speed(),
+			car_get_esc_us());
 }
 
 static void cmd_sys(void)
@@ -637,6 +641,13 @@ static void dispatch_command(const char *line)
 		control_cmd_stop();
 	} else if (strcmp(line, "$MONITOR") == 0) {
 		control_cmd_monitor();
+	} else if (strcmp(line, "$RECOVER") == 0) {
+		wifi_cmd_send("$T:SNS,phase=manual_recovery_start\n");
+		bool ok = sensors_recover_all();
+		wifi_cmd_printf("$T:SNS,phase=manual_recovery_done,ok=%d,online=%d,restarts=%u\n",
+			ok ? 1 : 0,
+			sensors_online_count(),
+			(unsigned int)sensors_restart_count());
 	} else if (strcmp(line, "$STATUS") == 0) {
 		wifi_cmd_printf("$STS:%s\n",
 			control_is_running() ? "RUN" :
@@ -644,6 +655,12 @@ static void dispatch_command(const char *line)
 			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
+	} else if (strcmp(line, "$PWR") == 0) {
+		wifi_cmd_printf("$PWR:BAT=%.2f,RAW=%.2f,MIN=%.2f,ESC=%d\n",
+			(double)battery_get_voltage(),
+			(double)battery_get_raw_voltage(),
+			(double)battery_get_min_voltage(),
+			car_get_esc_us());
 	} else if (strncmp(line, "$TEST:", 6) == 0) {
 		if (!queue_async_test(line + 6)) {
 			wifi_cmd_send("$NAK:busy\n");

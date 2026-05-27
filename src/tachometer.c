@@ -29,6 +29,10 @@ static atomic_t taho_count     = ATOMIC_INIT(0);
 static atomic_t taho_last_cyc  = ATOMIC_INIT(0);  /* raw HW cycles */
 static atomic_t taho_interval  = ATOMIC_INIT(0);   /* delta in µs */
 static atomic_t taho_glitch_filter_us = ATOMIC_INIT(35);
+static K_MUTEX_DEFINE(taho_speed_mutex);
+static uint32_t taho_speed_prev_count;
+static int64_t taho_speed_prev_ms;
+static float taho_speed_filtered;
 
 /* ─── Cycle-domain helpers ────────────────────────────────────────────────── */
 /* Subtract in cycle domain (uint32_t wrap is correct), then convert to µs.
@@ -106,21 +110,40 @@ float taho_get_speed(void)
 	struct car_settings c;
 	settings_get_copy(&c);
 
-	uint32_t now_cyc = k_cycle_get_32();
-	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
-	uint32_t iv = (uint32_t)atomic_get(&taho_interval);
+	int64_t now_ms = k_uptime_get();
+	uint32_t cnt = (uint32_t)atomic_get(&taho_count);
+	float speed;
 
-	uint32_t elapsed = cyc_delta_us(last_cyc, now_cyc);
-	if (elapsed < iv) {
-		elapsed = iv;
+	k_mutex_lock(&taho_speed_mutex, K_FOREVER);
+
+	if (taho_speed_prev_ms == 0 || c.encoder_holes <= 0) {
+		taho_speed_prev_ms = now_ms;
+		taho_speed_prev_count = cnt;
+		taho_speed_filtered = 0.0f;
+		speed = 0.0f;
+		goto out;
 	}
 
-	if (iv == 0 || elapsed > 500000 || c.encoder_holes <= 0) {
-		return 0.0f;
+	float dt = (now_ms - taho_speed_prev_ms) / 1000.0f;
+	if (dt >= 0.02f) {
+		uint32_t delta_cnt = cnt - taho_speed_prev_count;
+		float raw_speed = (delta_cnt / (float)c.encoder_holes) *
+				  ((float)M_PI * c.wheel_diam_m) / dt;
+
+		taho_speed_prev_ms = now_ms;
+		taho_speed_prev_count = cnt;
+
+		taho_speed_filtered = 0.7f * raw_speed + 0.3f * taho_speed_filtered;
+		if (taho_time_since_last_us() > 500000) {
+			taho_speed_filtered = 0.0f;
+		}
 	}
 
-	return ((float)M_PI * c.wheel_diam_m) /
-	       ((float)c.encoder_holes * ((float)elapsed / 1e6f));
+	speed = taho_speed_filtered;
+
+out:
+	k_mutex_unlock(&taho_speed_mutex);
+	return speed;
 }
 
 uint32_t taho_get_count(void)
@@ -140,6 +163,11 @@ void taho_reset(void)
 	atomic_set(&taho_count, 0);
 	atomic_set(&taho_last_cyc, (atomic_val_t)k_cycle_get_32());
 	atomic_set(&taho_interval, 0);
+	k_mutex_lock(&taho_speed_mutex, K_FOREVER);
+	taho_speed_prev_count = 0;
+	taho_speed_prev_ms = k_uptime_get();
+	taho_speed_filtered = 0.0f;
+	k_mutex_unlock(&taho_speed_mutex);
 }
 
 void taho_set_glitch_filter_us(uint32_t us)
