@@ -31,12 +31,15 @@ LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 #define SENSOR_OOR_MIN_BAD 3
 #define SENSOR_OOR_MIN_GOOD 2
 #define SENSOR_OOR_GOOD_MAX 1200
+#define SENSOR_I2C_SCAN_INTERVAL_MS 1000
 #define VL53L0X_WHO_AM_I_REG 0xC0
 #define VL53L0X_DEFAULT_ADDR 0x29
+#define VL53L0X_EXPECTED_MASK 0x3f
 
 static int distances[SENSOR_COUNT]; /* cm×10 */
 static int online_count;
 static volatile bool recovery_requested;
+static int64_t last_i2c_scan_ms;
 static const uint8_t vl53_i2c_addrs[SENSOR_COUNT] = {
 	0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
 };
@@ -231,6 +234,49 @@ static void store_mm(int i, int mm)
 	}
 }
 
+static uint8_t i2c_scan_mask_raw(void)
+{
+	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+	uint8_t mask = 0;
+	uint8_t reg = VL53L0X_WHO_AM_I_REG;
+	uint8_t id[2];
+
+	if (!device_is_ready(i2c1)) {
+		return 0;
+	}
+
+	for (int i = 0; i < SENSOR_COUNT; i++) {
+		if (i2c_write_read(i2c1, vl53_i2c_addrs[i], &reg, 1,
+				   id, sizeof(id)) == 0) {
+			mask |= BIT(i);
+		}
+	}
+
+	if (i2c_write_read(i2c1, VL53L0X_DEFAULT_ADDR, &reg, 1,
+			   id, sizeof(id)) == 0) {
+		mask |= BIT(6);
+	}
+
+	return mask;
+}
+
+static void check_i2c_health(void)
+{
+	int64_t now = k_uptime_get();
+
+	if (now - last_i2c_scan_ms < SENSOR_I2C_SCAN_INTERVAL_MS) {
+		return;
+	}
+	last_i2c_scan_ms = now;
+
+	uint8_t mask = i2c_scan_mask_raw();
+	if ((mask & VL53L0X_EXPECTED_MASK) != VL53L0X_EXPECTED_MASK ||
+	    (mask & BIT(6)) != 0) {
+		LOG_WRN("VL53L0X I2C recovery requested: mask=0x%02x", mask);
+		recovery_requested = true;
+	}
+}
+
 static void check_semantic_health(void)
 {
 	int64_t now = k_uptime_get();
@@ -298,6 +344,7 @@ int *sensors_poll(void)
 		poll_one(i);
 	}
 	check_semantic_health();
+	check_i2c_health();
 #endif
 	return distances;
 }
@@ -389,28 +436,7 @@ uint32_t sensors_restart_count(void)
 uint8_t sensors_i2c_scan_mask(void)
 {
 #if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
-	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-	uint8_t mask = 0;
-	uint8_t reg = VL53L0X_WHO_AM_I_REG;
-	uint8_t id[2];
-
-	if (!device_is_ready(i2c1)) {
-		return 0;
-	}
-
-	for (int i = 0; i < SENSOR_COUNT; i++) {
-		if (i2c_write_read(i2c1, vl53_i2c_addrs[i], &reg, 1,
-				   id, sizeof(id)) == 0) {
-			mask |= BIT(i);
-		}
-	}
-
-	if (i2c_write_read(i2c1, VL53L0X_DEFAULT_ADDR, &reg, 1,
-			   id, sizeof(id)) == 0) {
-		mask |= BIT(6);
-	}
-
-	return mask;
+	return i2c_scan_mask_raw();
 #else
 	return 0;
 #endif

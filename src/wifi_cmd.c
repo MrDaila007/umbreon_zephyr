@@ -516,7 +516,7 @@ static void cmd_diag(void)
 {
 	wifi_cmd_printf(
 		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f,BRAW=%.2f,BMIN=%.2f"
-		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,ESC=%d,SNR=%u\n",
+		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,ESC=%d,SNR=%u,I2C=%d,IM=%02X\n",
 		sensors_online_count(),
 		imu_is_ok() ? 1 : 0,
 		k_uptime_get(),
@@ -528,7 +528,9 @@ static void cmd_diag(void)
 		taho_get_count(),
 		(double)taho_get_speed(),
 		car_get_esc_us(),
-		(unsigned int)sensors_restart_count());
+		(unsigned int)sensors_restart_count(),
+		sensors_i2c_scan_count(),
+		sensors_i2c_scan_mask());
 }
 
 static void cmd_sns(void)
@@ -648,6 +650,12 @@ static void dispatch_command(const char *line)
 			ok ? 1 : 0,
 			sensors_online_count(),
 			(unsigned int)sensors_restart_count());
+	} else if (strcmp(line, "$I2C") == 0) {
+		uint8_t mask = sensors_i2c_scan_mask();
+		wifi_cmd_printf("$I2C:VL53=%d,MASK=%02X,ADDRS=30-35,DEF29=%d\n",
+			POPCOUNT(mask & 0x3f),
+			mask,
+			(mask & BIT(6)) ? 1 : 0);
 	} else if (strcmp(line, "$STATUS") == 0) {
 		wifi_cmd_printf("$STS:%s\n",
 			control_is_running() ? "RUN" :
