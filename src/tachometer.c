@@ -41,8 +41,8 @@ static inline uint32_t cyc_delta_us(uint32_t from_cyc, uint32_t to_cyc)
 	return (uint32_t)k_cyc_to_us_floor64(delta_cyc); /* small value — safe */
 }
 
-/* Reject only narrow EMI glitches on the optical line — not valid slot edges.
- * 200 µs here falsely dropped real pulses (~15+ m/s with 68 holes on Ø65 mm ≈ 200 µs). */
+/* Reject EMI glitches on the optical line. 500 µs corresponds to ~6 m/s
+ * (68 holes, Ø65 mm) — above realistic robot speed, safely excludes false pulses. */
 static inline uint32_t clamp_glitch_filter_us(uint32_t us)
 {
 	if (us < 1U) {

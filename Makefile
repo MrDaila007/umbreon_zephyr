@@ -22,10 +22,16 @@ HIL_SERIAL_BAUD ?= 115200
 HIL_LOG_DIR ?= /tmp
 HIL_DURATION ?= 300
 HIL_TGF ?= 500
+WIFI_HOST ?= 192.168.4.1
+WIFI_PORT ?= 23
+WIFI_TRANSPORT ?= tcp
+WIFI_DURATION ?= 300
+WIFI_START ?= 0
+WIFI_LOG_DIR ?= /tmp
 SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 
 .PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
-	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor
+	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log
 
 setup:
 	./setup_zephyr.sh $(ZEPHYR_DIR)
@@ -103,7 +109,7 @@ hil-smoke:
 		--serial-port $(PROBE_UART) --baud $(BAUD) \
 		--raw-log $(HIL_LOG_DIR)/umbreon_hil_smoke.log \
 		--summary $(HIL_LOG_DIR)/umbreon_hil_smoke.json \
-		--max-speed 6.0
+		--max-speed 6.0 --settle-s 12
 
 hil-endurance:
 	$(PYTHON_BIN) tools/hil_runner.py --profile endurance \
@@ -120,3 +126,11 @@ hil-motor:
 		--raw-log $(HIL_LOG_DIR)/umbreon_hil_motor.log \
 		--summary $(HIL_LOG_DIR)/umbreon_hil_motor.json \
 		--max-speed 6.0
+
+wifi-run-log:
+	$(PYTHON_BIN) tools/wifi_run_logger.py \
+		--host $(WIFI_HOST) --port $(WIFI_PORT) --transport $(WIFI_TRANSPORT) \
+		--duration $(WIFI_DURATION) \
+		$(if $(filter 1 true yes,$(WIFI_START)),--start,) \
+		--raw-log $(WIFI_LOG_DIR)/umbreon_wifi_run.log \
+		--summary $(WIFI_LOG_DIR)/umbreon_wifi_run.json

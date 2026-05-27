@@ -117,7 +117,7 @@ static void set_defaults(void)
 	cfg.bat_enabled    = false;
 	cfg.bat_multiplier = 4.85f;
 	cfg.bat_low        = 6.0f;
-	cfg.tach_glitch_filter_us = 35;
+	cfg.tach_glitch_filter_us = 500;
 }
 
 static void sanitize_cfg(void)

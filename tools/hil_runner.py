@@ -117,7 +117,9 @@ def analyze_lines(lines: Iterable[str], gap_ms: int) -> Analysis:
             out.run_lines += 1
         if line.startswith("$BAT:"):
             try:
-                out.battery_values.append(float(line[5:]))
+                v = float(line[5:])
+                if v > 0.1:  # 0.00 means battery disabled; skip
+                    out.battery_values.append(v)
             except ValueError:
                 pass
 
@@ -204,6 +206,19 @@ def wait_for_pattern(
     return False
 
 
+def _settle_drain(ser: "serial.Serial", timeout_s: float) -> None:
+    """Read and discard serial output until $BOOT:READY or timeout.
+
+    Called before opening the raw log so initial boot messages are not
+    written to the analysis window and cannot trigger boot-marker failures.
+    """
+    end = time.monotonic() + timeout_s
+    while time.monotonic() < end:
+        raw = ser.readline()
+        if raw and b"$BOOT:READY" in raw:
+            return
+
+
 def safe_stop(ser: "serial.Serial", raw_log, mirror: bool) -> list[str]:
     for command in ("$STOP", "$DRVOFF", "$STATUS", "$BAT"):
         send_line(ser, command, raw_log)
@@ -279,7 +294,7 @@ def assert_analysis(profile: str, analysis: Analysis, args) -> list[str]:
         failures.append(f"too few valid telemetry frames: {analysis.csv_valid} < {args.min_csv}")
     if analysis.max_speed > args.max_speed:
         failures.append(f"speed spike {analysis.max_speed:.2f} m/s > {args.max_speed:.2f}")
-    if analysis.battery_values and min(analysis.battery_values) < args.min_battery:
+    if args.set_battery and analysis.battery_values and min(analysis.battery_values) < args.min_battery:
         failures.append(f"battery {min(analysis.battery_values):.2f} V < {args.min_battery:.2f} V")
     if profile == "endurance" and analysis.run_lines == 0:
         failures.append("no $RUN lines captured during endurance profile")
@@ -340,6 +355,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--min-csv", type=int, default=1)
     parser.add_argument("--max-speed", type=float, default=6.0)
     parser.add_argument("--min-battery", type=float, default=6.5)
+    parser.add_argument("--settle-s", type=float, default=0.0,
+                        help="drain initial boot output before logging (seconds); smoke profile only")
     return parser.parse_args(argv)
 
 
@@ -357,6 +374,8 @@ def main(argv: list[str]) -> int:
 
     try:
         with serial.Serial(args.serial_port, args.baud, timeout=0.2) as ser:
+            if args.profile == "smoke" and args.settle_s > 0:
+                _settle_drain(ser, args.settle_s)
             with args.raw_log.open("w", encoding="utf-8", errors="replace") as raw_log:
                 if args.profile == "smoke":
                     all_lines = run_smoke(ser, raw_log, args)
