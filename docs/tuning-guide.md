@@ -82,12 +82,13 @@ gradually for faster laps once PID and steering are stable.
 **0** = instant step (old behavior). A value around **0.8–1.2** softens starts
 and SPD1↔SPD2 transitions. Feedforward follows the slewed setpoint.
 
-### Start kick (KOP, KOM)
+### Start kick (KOP, KOM, CKU)
 
 Short **extra ESC pulse** when commanding forward from rest:
 
-- `KOP`: percent of **(XSP − MSP)** span added as µs (capped in firmware)
+- `KOP`: percent of forward ESC span **(XSP − 1500)** added as µs (capped in firmware)
 - `KOM`: duration in **ms**; ends early when measured speed reaches ~78% of setpoint
+- `CKU`: extra ESC µs at full steering lock while speed is still near zero
 - `KOP = 0` disables kick
 
 Use a small kick if the car is lazy off the line; reduce if it lurches.
@@ -99,7 +100,7 @@ Use a small kick if the car is lazy off the line; reduce if it lurches.
 - `BSP`: reverse pulse (µs)
 
 If the motor doesn't start at low speeds, **increase MSP** slightly. If top speed
-is too high, **decrease XSP**. Kick strength scales with **(XSP − MSP)**.
+is too high, **decrease XSP**. Kick strength scales with **(XSP − 1500)**.
 
 ## Obstacle Detection
 

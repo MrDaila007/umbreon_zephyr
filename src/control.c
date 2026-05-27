@@ -188,7 +188,7 @@ static void maneuver_start_back(const struct car_settings *c)
 
 	send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
 	car_write_speed(0);
-	mnv_deadline = k_uptime_get() + 2000;
+	mnv_deadline = k_uptime_get() + c->reverse_drive_ms;
 	mnv = MNV_BACK_WAIT_STOP;
 	stuck_time = 0;
 }
@@ -198,7 +198,7 @@ static void maneuver_start_long(const struct car_settings *c)
 	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
 	car_write_speed(0);
 	car_write_steer(c->race_cw ? 1000 : -1000);
-	mnv_deadline = k_uptime_get() + 2000;
+	mnv_deadline = k_uptime_get() + c->reverse_drive_ms;
 	mnv = MNV_LONG_WAIT_STOP;
 }
 
@@ -215,8 +215,8 @@ static void maneuver_tick(const struct car_settings *c)
 	case MNV_BACK_WAIT_STOP:
 		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_steer(mnv_steer);
-			car_write_speed(-150);
-			mnv_deadline = now + 500;
+			car_write_speed(c->reverse_brake_cmd);
+			mnv_deadline = now + c->reverse_brake_ms;
 			mnv = MNV_BACK_BRAKE;
 		}
 		break;
@@ -231,10 +231,10 @@ static void maneuver_tick(const struct car_settings *c)
 
 	case MNV_BACK_NEUTRAL:
 		if (now >= mnv_deadline) {
-			car_write_speed(-150);
+			car_write_speed(c->reverse_drive_cmd);
 			mnv_start_count = taho_get_count();
 			mnv_alt = 0;
-			mnv_deadline = now + 2000;
+			mnv_deadline = now + c->reverse_drive_ms;
 			mnv = MNV_BACK_REVERSE;
 		}
 		break;
@@ -278,8 +278,8 @@ static void maneuver_tick(const struct car_settings *c)
 
 	case MNV_LONG_WAIT_STOP:
 		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
-			car_write_speed(-150);
-			mnv_deadline = now + 1000;
+			car_write_speed(c->reverse_brake_cmd);
+			mnv_deadline = now + c->long_reverse_brake_ms;
 			mnv = MNV_LONG_BRAKE;
 		}
 		break;
@@ -294,8 +294,8 @@ static void maneuver_tick(const struct car_settings *c)
 
 	case MNV_LONG_NEUTRAL:
 		if (now >= mnv_deadline) {
-			car_write_speed(-150);
-			mnv_deadline = now + 1800;
+			car_write_speed(c->reverse_drive_cmd);
+			mnv_deadline = now + c->long_reverse_drive_ms;
 			mnv = MNV_LONG_REVERSE;
 		}
 		break;
@@ -304,8 +304,8 @@ static void maneuver_tick(const struct car_settings *c)
 		if (now >= mnv_deadline) {
 			car_write_speed(0);
 			car_write_steer(c->race_cw ? -700 : 700);
-			car_write_speed_ms(2.0f);
-			mnv_deadline = now + 900;
+			car_write_speed_ms(MIN(c->spd_blocked, c->long_forward_speed_cap));
+			mnv_deadline = now + c->long_forward_ms;
 			mnv = MNV_LONG_FORWARD;
 		}
 		break;

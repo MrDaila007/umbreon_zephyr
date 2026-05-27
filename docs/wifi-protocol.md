@@ -153,44 +153,65 @@ $BOOT:READY,UP=4200         # Boot complete, uptime in ms
 ## Configuration Parameters
 
 Compile-time defaults are in `src/settings.c` (`set_defaults()`). **`$LOAD`**
-restores last **`$SAVE`** blob; **`$RST`** resets to these defaults. NVS format
-version may bump when new fields are added — old saves are rejected until you
-re-save.
+restores the last **`$SAVE`** blob; **`$RST`** resets to these defaults. NVS
+format version may bump when new fields are added; firmware keeps migration code
+for recent saved versions and fills new fields from defaults.
 
-| Key | Description | Typical default | Unit |
-|-----|-------------|-----------------|------|
-| FOD | Front obstacle threshold | 800 | sensor units (see `settings.h`; same scale as `$SNS`) |
-| SOD | Side “open” threshold | 600 | sensor units |
-| ACD | All-close threshold | 400 | sensor units |
-| CFD | Close-front (stuck) threshold | 150 | sensor units |
-| KP | PID proportional gain | *from pidtune* | — |
-| KI | PID integral gain | *from pidtune* | — |
-| KD | PID derivative gain | *from pidtune* | — |
-| MSP | Min forward ESC (feedforward / PID floor) | 1540 | µs |
-| XSP | Max forward ESC | 1600 | µs |
-| BSP | Reverse ESC | 1460 | µs |
-| MNP | Min servo angle | 60 | ° |
-| XNP | Max servo angle | 120 | ° |
-| NTP | Neutral servo angle | 90 | ° |
-| ENH | Encoder holes per rev | 68 | — |
-| WDM | Wheel diameter | 0.060 | m |
-| LMS | Control loop period | 40 | ms |
-| SPD1 | Speed (path clear) | 0.48 | m/s |
-| SPD2 | Speed (path blocked) | 0.32 | m/s |
-| SLW | Setpoint slew rate | 0.85 | m/s per s (`0` = off) |
-| KOP | Start-kick strength | 18 | % of `(XSP−MSP)` span (`0` = off) |
-| KOM | Start-kick duration | 300 | ms |
-| COE1 | Steering coef (clear) | 0.28 | — |
-| COE2 | Steering coef (blocked) | 0.65 | — |
-| WDD | Wrong direction threshold | 120 | ° |
-| RCW | Race clockwise | 1 | bool |
-| STK | Stuck threshold | 25 | ticks |
-| IMR | IMU use in navigation | 1 | bool |
-| SVR | Servo reverse | 0 | bool |
-| CAL | ESC calibrated | 0 | bool |
-| BEN | Battery monitoring enabled | 0 | bool |
-| BML | Battery voltage multiplier | 4.85 | — (calibrate for your divider) |
-| BLV | Battery low voltage cutoff | 6.0 | V |
+Example:
+
+```
+$SET:KP=30,KI=45,KD=0,TGF=400,CKU=45,LFS=0.12,LFM=400
+$SAVE
+```
+
+Sensor distance units match `$SNS` output and current firmware constants
+(`cm x 10`; `9999` means no wall / out of range in telemetry paths).
+
+| Key | Description | Default | Unit / range |
+|-----|-------------|---------|--------------|
+| FOD | Front obstacle threshold; selects blocked speed/steering when a front sensor is closer | 800 | sensor units |
+| SOD | Side-open threshold; if both sides are open, wall-follow bias is used | 600 | sensor units |
+| ACD | All-close threshold; if all sensors are close, wall-follow bias is used | 400 | sensor units |
+| CFD | Close-front threshold used by stuck detection | 100 | sensor units |
+| KP | PID proportional gain | 66.4 | float |
+| KI | PID integral gain | 243.5 | float |
+| KD | PID derivative gain | 4.16 | float |
+| MSP | Minimum forward ESC pulse; PID feedforward floor / motor dead-zone compensation | 1540 | µs, 1000-2000 |
+| XSP | Maximum forward ESC pulse; final PID output clamp | 1600 | µs, 1000-2000 |
+| BSP | Reverse ESC pulse used by direct `car_write_speed(-x)` mapping endpoint | 1460 | µs, 1000-2000 |
+| MNP | Servo angle at full left command | 60 | degrees, 0-180 |
+| XNP | Servo angle at full right command | 120 | degrees, 0-180 |
+| NTP | Servo neutral angle | 90 | degrees, 0-180 |
+| ENH | Encoder holes per wheel revolution | 68 | count |
+| WDM | Wheel diameter used for speed/distance from tachometer | 0.060 | meters |
+| LMS | Control loop period | 40 | ms, min 10 |
+| SPD1 | Target speed when path ahead is clear | 0.48 | m/s |
+| SPD2 | Target speed when front obstacle logic selects blocked/slow mode | 0.32 | m/s |
+| SLW | PID setpoint slew limit; `0` disables smoothing | 0.85 | m/s per s |
+| KOP | Start-kick strength; percent of forward ESC span `(XSP - 1500)` | 18.0 | %, 0-80 |
+| KOM | Start-kick duration after forward command from rest | 300 | ms, 0-5000 |
+| CKU | Extra launch ESC microseconds at full steering lock while speed is below ~0.12 m/s | 30 | µs, 0-120 |
+| COE1 | Steering coefficient when path is clear | 0.28 | float |
+| COE2 | Steering coefficient when front is blocked | 0.65 | float |
+| WDD | Wrong-direction heading threshold before long recovery maneuver | 120.0 | degrees |
+| RCW | Race direction flag: `1` clockwise, `0` counter-clockwise | 1 | bool |
+| STK | Stuck counter threshold before short reverse escape | 25 | control ticks |
+| STL | Stall counter threshold for stall state reporting | 50 | control ticks |
+| RBC | Reverse brake command for ESC brake phase | -250 | raw speed cmd, -1000..0 |
+| RDC | Reverse drive command after brake-neutral phase | -380 | raw speed cmd, -1000..0 |
+| RBM | Reverse brake phase duration | 650 | ms, 0-5000 |
+| RDM | Short reverse drive phase timeout | 2600 | ms, 0-5000 |
+| LBM | Long/wrong-direction reverse brake phase duration | 1100 | ms, 0-5000 |
+| LDM | Long/wrong-direction reverse drive phase timeout | 2400 | ms, 0-5000 |
+| LFS | Long/wrong-direction final forward speed cap; actual target is `min(SPD2, LFS)` | 0.18 | m/s, 0-2 |
+| LFM | Long/wrong-direction final forward phase duration | 550 | ms, 0-5000 |
+| IMR | IMU rotate flag used by navigation orientation | 1 | bool |
+| SVR | Reverse servo command direction | 0 | bool |
+| CAL | ESC calibrated flag | 0 | bool |
+| BEN | Battery monitoring enabled flag | 0 | bool |
+| BML | Battery voltage multiplier for ADC divider calibration | 4.85 | float |
+| BLV | Battery low voltage threshold | 6.0 | volts |
+| TGF | Tachometer glitch reject threshold | 500 | µs, 1-500 |
 
 Read-only keys appended on `$GET` (not writable via `$SET`): `IMU`, `DBG`, `SNS`,
 `SMX`, `FWV`.

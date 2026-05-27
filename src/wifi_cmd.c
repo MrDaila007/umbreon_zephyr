@@ -407,12 +407,21 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "SLW")  == 0) cfg.spd_slew           = strtof(val, NULL);
 	else if (strcmp(key, "KOP")  == 0) cfg.kick_pct           = strtof(val, NULL);
 	else if (strcmp(key, "KOM")  == 0) cfg.kick_ms            = MAX(atoi(val), 0);
+	else if (strcmp(key, "CKU")  == 0) cfg.corner_kick_us     = CLAMP(atoi(val), 0, 120);
 	else if (strcmp(key, "COE1") == 0) cfg.coe_clear           = strtof(val, NULL);
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
 	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "STL")  == 0) cfg.stall_thresh        = MAX(atoi(val), 0);
+	else if (strcmp(key, "RBC")  == 0) cfg.reverse_brake_cmd   = CLAMP(atoi(val), -1000, 0);
+	else if (strcmp(key, "RDC")  == 0) cfg.reverse_drive_cmd   = CLAMP(atoi(val), -1000, 0);
+	else if (strcmp(key, "RBM")  == 0) cfg.reverse_brake_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "RDM")  == 0) cfg.reverse_drive_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LBM")  == 0) cfg.long_reverse_brake_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LDM")  == 0) cfg.long_reverse_drive_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LFS")  == 0) cfg.long_forward_speed_cap = strtof(val, NULL);
+	else if (strcmp(key, "LFM")  == 0) cfg.long_forward_ms    = CLAMP(atoi(val), 0, 5000);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -430,7 +439,7 @@ static bool parse_set_pair(const char *pair)
 static void cmd_get(void)
 {
 	struct car_settings c;
-	static char out[768];
+	static char out[1024];
 
 	settings_get_copy(&c);
 	k_mutex_lock(&cfg_get_mutex, K_FOREVER);
@@ -441,9 +450,10 @@ static void cmd_get(void)
 		",MSP=%d,XSP=%d,BSP=%d"
 		",MNP=%d,XNP=%d,NTP=%d"
 		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d,CKU=%d"
 		",COE1=%.2f,COE2=%.2f"
 		",WDD=%.1f,RCW=%d,STK=%d,STL=%d"
+		",RBC=%d,RDC=%d,RBM=%d,RDM=%d,LBM=%d,LDM=%d,LFS=%.2f,LFM=%d"
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
 		",TGF=%d"
@@ -456,10 +466,14 @@ static void cmd_get(void)
 		c.encoder_holes, (double)c.wheel_diam_m, c.loop_ms,
 		(double)c.spd_clear, (double)c.spd_blocked,
 		(double)c.spd_slew,
-		(double)c.kick_pct, c.kick_ms,
+		(double)c.kick_pct, c.kick_ms, c.corner_kick_us,
 		(double)c.coe_clear, (double)c.coe_blocked,
 		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0,
 		c.stuck_thresh, c.stall_thresh,
+		c.reverse_brake_cmd, c.reverse_drive_cmd,
+		c.reverse_brake_ms, c.reverse_drive_ms,
+		c.long_reverse_brake_ms, c.long_reverse_drive_ms,
+		(double)c.long_forward_speed_cap, c.long_forward_ms,
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,

@@ -384,10 +384,13 @@ Authoritative defaults and new keys are in **`src/settings.c`** and
 | LMS | Loop period (ms) | 40 |
 | SPD1 / SPD2 | Cruise speeds (m/s) | ~0.48 / 0.32 |
 | SLW | Setpoint slew (m/s per s; 0=off) | 0.85 |
-| KOP / KOM | Start kick % / ms (KOP 0=off) | 18 / 300 |
+| KOP / KOM / CKU | Start kick %, duration, steering-load extra µs | 18 / 300 / 30 |
 | COE1/COE2 | Steering gain clear/blocked | 0.28 / 0.65 |
-| WDD / RCW / STK / IMR / SVR / CAL | Navigation & hardware flags | see `settings.c` |
+| RBC/RDC/RBM/RDM | Short reverse escape command/timing | see `settings.c` |
+| LBM/LDM/LFS/LFM | Wrong-direction recovery reverse/forward timing | see `settings.c` |
+| WDD / RCW / STK / STL / IMR / SVR / CAL | Navigation & hardware flags | see `settings.c` |
 | BEN / BML / BLV | Battery monitor / scale / low (V) | 0 / 4.85 / 6.0 |
+| TGF | Tachometer glitch filter (µs) | 500 |
 
 ## TODO
 

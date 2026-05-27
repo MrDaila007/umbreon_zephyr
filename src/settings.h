@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* ─── Runtime-configurable parameters (34 total) ──────────────────────────── */
+/* ─── Runtime-configurable parameters ─────────────────────────────────────── */
 struct car_settings {
 	/* Obstacle thresholds (cm×10) */
 	int front_obstacle_dist;
@@ -38,9 +38,10 @@ struct car_settings {
 	float spd_blocked;
 	/* Max rate of change of PID speed setpoint (m/s²); 0 = instant step */
 	float spd_slew;
-	/* Start boost: extra ESC µs = kick_pct% of (max_speed−min_speed) for kick_ms */
+	/* Start boost: extra ESC µs = kick_pct% of forward ESC span for kick_ms */
 	float kick_pct;
 	int   kick_ms;
+	int   corner_kick_us;
 	float coe_clear;
 	float coe_blocked;
 
@@ -49,6 +50,14 @@ struct car_settings {
 	bool race_cw;
 	int stuck_thresh;
 	int stall_thresh;
+	int reverse_brake_cmd;
+	int reverse_drive_cmd;
+	int reverse_brake_ms;
+	int reverse_drive_ms;
+	int long_reverse_brake_ms;
+	int long_reverse_drive_ms;
+	float long_forward_speed_cap;
+	int long_forward_ms;
 
 	/* IMU */
 	bool imu_rotate;

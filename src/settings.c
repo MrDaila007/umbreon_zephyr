@@ -1,7 +1,7 @@
 /*
  * settings.c — Persistent configuration via Zephyr NVS
  *
- * Stores 34 runtime-configurable parameters to flash.
+ * Stores runtime-configurable parameters to flash.
  * NVS key 1 = CarSettings blob + checksum.
  */
 
@@ -27,13 +27,111 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   10
+#define SETTINGS_VERSION   12
+#define SETTINGS_VERSION_V11 11
+#define SETTINGS_VERSION_V10 10
 
 static struct nvs_fs nvs;
 static bool nvs_ready;
 
 /* ─── NVS storage structure (packed for flash) ────────────────────────────── */
 struct __attribute__((packed)) nvs_settings {
+	uint32_t magic;
+	uint8_t  version;
+	int16_t  front_obstacle_dist;
+	int16_t  side_open_dist;
+	int16_t  all_close_dist;
+	int16_t  close_front_dist;
+	float    pid_kp;
+	float    pid_ki;
+	float    pid_kd;
+	int16_t  min_speed;
+	int16_t  max_speed;
+	int16_t  min_bspeed;
+	int8_t   min_point;
+	int8_t   max_point;
+	int8_t   neutral_point;
+	int16_t  encoder_holes;
+	float    wheel_diam_m;
+	int16_t  loop_ms;
+	float    spd_clear;
+	float    spd_blocked;
+	float    spd_slew;
+	float    kick_pct;
+	int16_t  kick_ms;
+	int16_t  corner_kick_us;
+	float    coe_clear;
+	float    coe_blocked;
+	float    wrong_dir_deg;
+	uint8_t  race_cw;
+	int16_t  stuck_thresh;
+	int16_t  stall_thresh;
+	int16_t  reverse_brake_cmd;
+	int16_t  reverse_drive_cmd;
+	int16_t  reverse_brake_ms;
+	int16_t  reverse_drive_ms;
+	int16_t  long_reverse_brake_ms;
+	int16_t  long_reverse_drive_ms;
+	float    long_forward_speed_cap;
+	int16_t  long_forward_ms;
+	uint8_t  imu_rotate;
+	uint8_t  servo_reverse;
+	uint8_t  calibrated;
+	uint8_t  bat_enabled;
+	float    bat_multiplier;
+	float    bat_low;
+	int16_t  tach_glitch_filter_us;
+	uint8_t  checksum;
+};
+
+struct __attribute__((packed)) nvs_settings_v11 {
+	uint32_t magic;
+	uint8_t  version;
+	int16_t  front_obstacle_dist;
+	int16_t  side_open_dist;
+	int16_t  all_close_dist;
+	int16_t  close_front_dist;
+	float    pid_kp;
+	float    pid_ki;
+	float    pid_kd;
+	int16_t  min_speed;
+	int16_t  max_speed;
+	int16_t  min_bspeed;
+	int8_t   min_point;
+	int8_t   max_point;
+	int8_t   neutral_point;
+	int16_t  encoder_holes;
+	float    wheel_diam_m;
+	int16_t  loop_ms;
+	float    spd_clear;
+	float    spd_blocked;
+	float    spd_slew;
+	float    kick_pct;
+	int16_t  kick_ms;
+	int16_t  corner_kick_us;
+	float    coe_clear;
+	float    coe_blocked;
+	float    wrong_dir_deg;
+	uint8_t  race_cw;
+	int16_t  stuck_thresh;
+	int16_t  stall_thresh;
+	int16_t  reverse_brake_cmd;
+	int16_t  reverse_drive_cmd;
+	int16_t  reverse_brake_ms;
+	int16_t  reverse_drive_ms;
+	int16_t  long_reverse_brake_ms;
+	int16_t  long_reverse_drive_ms;
+	uint8_t  imu_rotate;
+	uint8_t  servo_reverse;
+	uint8_t  calibrated;
+	uint8_t  bat_enabled;
+	float    bat_multiplier;
+	float    bat_low;
+	int16_t  tach_glitch_filter_us;
+	uint8_t  checksum;
+};
+
+struct __attribute__((packed)) nvs_settings_v10 {
 	uint32_t magic;
 	uint8_t  version;
 	int16_t  front_obstacle_dist;
@@ -105,12 +203,21 @@ static void set_defaults(void)
 	cfg.spd_slew      = 0.85f;
 	cfg.kick_pct      = 18.0f;
 	cfg.kick_ms       = 300;
+	cfg.corner_kick_us = 30;
 	cfg.coe_clear     = 0.28f;
 	cfg.coe_blocked   = 0.65f;
 	cfg.wrong_dir_deg = 120.0f;
 	cfg.race_cw       = true;
 	cfg.stuck_thresh  = 25;
 	cfg.stall_thresh  = 50;
+	cfg.reverse_brake_cmd = -250;
+	cfg.reverse_drive_cmd = -380;
+	cfg.reverse_brake_ms = 650;
+	cfg.reverse_drive_ms = 2600;
+	cfg.long_reverse_brake_ms = 1100;
+	cfg.long_reverse_drive_ms = 2400;
+	cfg.long_forward_speed_cap = 0.18f;
+	cfg.long_forward_ms = 550;
 	cfg.imu_rotate    = true;
 	cfg.servo_reverse = false;
 	cfg.calibrated    = false;
@@ -143,6 +250,14 @@ static void sanitize_cfg(void)
 	cfg.kick_ms = CLAMP(cfg.kick_ms, 0, 5000);
 	cfg.stuck_thresh = CLAMP(cfg.stuck_thresh, 0, 1000);
 	cfg.stall_thresh = CLAMP(cfg.stall_thresh, 0, 1000);
+	cfg.corner_kick_us = CLAMP(cfg.corner_kick_us, 0, 120);
+	cfg.reverse_brake_cmd = CLAMP(cfg.reverse_brake_cmd, -1000, 0);
+	cfg.reverse_drive_cmd = CLAMP(cfg.reverse_drive_cmd, -1000, 0);
+	cfg.reverse_brake_ms = CLAMP(cfg.reverse_brake_ms, 0, 5000);
+	cfg.reverse_drive_ms = CLAMP(cfg.reverse_drive_ms, 0, 5000);
+	cfg.long_reverse_brake_ms = CLAMP(cfg.long_reverse_brake_ms, 0, 5000);
+	cfg.long_reverse_drive_ms = CLAMP(cfg.long_reverse_drive_ms, 0, 5000);
+	cfg.long_forward_ms = CLAMP(cfg.long_forward_ms, 0, 5000);
 	cfg.tach_glitch_filter_us = CLAMP(cfg.tach_glitch_filter_us, 1, 500);
 
 	cfg.pid_kp = CLAMP(cfg.pid_kp, 0.0f, 5000.0f);
@@ -155,6 +270,7 @@ static void sanitize_cfg(void)
 	cfg.kick_pct = CLAMP(cfg.kick_pct, 0.0f, 80.0f);
 	cfg.coe_clear = CLAMP(cfg.coe_clear, 0.0f, 5.0f);
 	cfg.coe_blocked = CLAMP(cfg.coe_blocked, 0.0f, 5.0f);
+	cfg.long_forward_speed_cap = CLAMP(cfg.long_forward_speed_cap, 0.0f, 2.0f);
 	cfg.wrong_dir_deg = CLAMP(cfg.wrong_dir_deg, 1.0f, 360.0f);
 	cfg.bat_multiplier = CLAMP(cfg.bat_multiplier, 0.1f, 20.0f);
 	cfg.bat_low = CLAMP(cfg.bat_low, 0.1f, 20.0f);
@@ -169,6 +285,7 @@ static void sanitize_cfg(void)
 	if (!isfinite(cfg.kick_pct)) cfg.kick_pct = 0.0f;
 	if (!isfinite(cfg.coe_clear)) cfg.coe_clear = 0.0f;
 	if (!isfinite(cfg.coe_blocked)) cfg.coe_blocked = 0.0f;
+	if (!isfinite(cfg.long_forward_speed_cap)) cfg.long_forward_speed_cap = 0.18f;
 	if (!isfinite(cfg.wrong_dir_deg)) cfg.wrong_dir_deg = 120.0f;
 	if (!isfinite(cfg.bat_multiplier)) cfg.bat_multiplier = 4.85f;
 	if (!isfinite(cfg.bat_low)) cfg.bat_low = 6.0f;
@@ -176,6 +293,28 @@ static void sanitize_cfg(void)
 
 /* ─── Checksum ────────────────────────────────────────────────────────────── */
 static uint8_t compute_checksum(const struct nvs_settings *s)
+{
+	uint8_t sum = 0;
+	const uint8_t *p = (const uint8_t *)s;
+	size_t len = sizeof(*s) - 1;  /* exclude checksum byte */
+	for (size_t i = 0; i < len; i++) {
+		sum += p[i];
+	}
+	return sum;
+}
+
+static uint8_t compute_checksum_v10(const struct nvs_settings_v10 *s)
+{
+	uint8_t sum = 0;
+	const uint8_t *p = (const uint8_t *)s;
+	size_t len = sizeof(*s) - 1;  /* exclude checksum byte */
+	for (size_t i = 0; i < len; i++) {
+		sum += p[i];
+	}
+	return sum;
+}
+
+static uint8_t compute_checksum_v11(const struct nvs_settings_v11 *s)
 {
 	uint8_t sum = 0;
 	const uint8_t *p = (const uint8_t *)s;
@@ -212,12 +351,21 @@ static void populate_nvs(struct nvs_settings *s)
 	s->spd_slew      = cfg.spd_slew;
 	s->kick_pct      = cfg.kick_pct;
 	s->kick_ms       = (int16_t)cfg.kick_ms;
+	s->corner_kick_us = (int16_t)cfg.corner_kick_us;
 	s->coe_clear     = cfg.coe_clear;
 	s->coe_blocked   = cfg.coe_blocked;
 	s->wrong_dir_deg = cfg.wrong_dir_deg;
 	s->race_cw       = cfg.race_cw ? 1 : 0;
 	s->stuck_thresh  = (int16_t)cfg.stuck_thresh;
 	s->stall_thresh  = (int16_t)cfg.stall_thresh;
+	s->reverse_brake_cmd = (int16_t)cfg.reverse_brake_cmd;
+	s->reverse_drive_cmd = (int16_t)cfg.reverse_drive_cmd;
+	s->reverse_brake_ms = (int16_t)cfg.reverse_brake_ms;
+	s->reverse_drive_ms = (int16_t)cfg.reverse_drive_ms;
+	s->long_reverse_brake_ms = (int16_t)cfg.long_reverse_brake_ms;
+	s->long_reverse_drive_ms = (int16_t)cfg.long_reverse_drive_ms;
+	s->long_forward_speed_cap = cfg.long_forward_speed_cap;
+	s->long_forward_ms = (int16_t)cfg.long_forward_ms;
 	s->imu_rotate    = cfg.imu_rotate ? 1 : 0;
 	s->servo_reverse = cfg.servo_reverse ? 1 : 0;
 	s->calibrated    = cfg.calibrated ? 1 : 0;
@@ -252,12 +400,106 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.spd_slew      = s->spd_slew;
 	cfg.kick_pct      = s->kick_pct;
 	cfg.kick_ms       = s->kick_ms;
+	cfg.corner_kick_us = s->corner_kick_us;
 	cfg.coe_clear     = s->coe_clear;
 	cfg.coe_blocked   = s->coe_blocked;
 	cfg.wrong_dir_deg = s->wrong_dir_deg;
 	cfg.race_cw       = s->race_cw != 0;
 	cfg.stuck_thresh  = s->stuck_thresh;
 	cfg.stall_thresh  = s->stall_thresh;
+	cfg.reverse_brake_cmd = s->reverse_brake_cmd;
+	cfg.reverse_drive_cmd = s->reverse_drive_cmd;
+	cfg.reverse_brake_ms = s->reverse_brake_ms;
+	cfg.reverse_drive_ms = s->reverse_drive_ms;
+	cfg.long_reverse_brake_ms = s->long_reverse_brake_ms;
+	cfg.long_reverse_drive_ms = s->long_reverse_drive_ms;
+	cfg.long_forward_speed_cap = s->long_forward_speed_cap;
+	cfg.long_forward_ms = s->long_forward_ms;
+	cfg.imu_rotate    = s->imu_rotate != 0;
+	cfg.servo_reverse = s->servo_reverse != 0;
+	cfg.calibrated    = s->calibrated != 0;
+	cfg.bat_enabled   = s->bat_enabled != 0;
+	cfg.bat_multiplier = s->bat_multiplier;
+	cfg.bat_low       = s->bat_low;
+	cfg.tach_glitch_filter_us = s->tach_glitch_filter_us;
+	sanitize_cfg();
+}
+
+static void apply_nvs_v10(const struct nvs_settings_v10 *s)
+{
+	cfg.front_obstacle_dist = s->front_obstacle_dist;
+	cfg.side_open_dist      = s->side_open_dist;
+	cfg.all_close_dist      = s->all_close_dist;
+	cfg.close_front_dist    = s->close_front_dist;
+	cfg.pid_kp       = s->pid_kp;
+	cfg.pid_ki       = s->pid_ki;
+	cfg.pid_kd       = s->pid_kd;
+	cfg.min_speed    = s->min_speed;
+	cfg.max_speed    = s->max_speed;
+	cfg.min_bspeed   = s->min_bspeed;
+	cfg.min_point    = s->min_point;
+	cfg.max_point    = s->max_point;
+	cfg.neutral_point = s->neutral_point;
+	cfg.encoder_holes = s->encoder_holes;
+	cfg.wheel_diam_m  = s->wheel_diam_m;
+	cfg.loop_ms       = s->loop_ms;
+	cfg.spd_clear     = s->spd_clear;
+	cfg.spd_blocked   = s->spd_blocked;
+	cfg.spd_slew      = s->spd_slew;
+	cfg.kick_pct      = s->kick_pct;
+	cfg.kick_ms       = s->kick_ms;
+	cfg.coe_clear     = s->coe_clear;
+	cfg.coe_blocked   = s->coe_blocked;
+	cfg.wrong_dir_deg = s->wrong_dir_deg;
+	cfg.race_cw       = s->race_cw != 0;
+	cfg.stuck_thresh  = s->stuck_thresh;
+	cfg.stall_thresh  = s->stall_thresh;
+	cfg.imu_rotate    = s->imu_rotate != 0;
+	cfg.servo_reverse = s->servo_reverse != 0;
+	cfg.calibrated    = s->calibrated != 0;
+	cfg.bat_enabled   = s->bat_enabled != 0;
+	cfg.bat_multiplier = s->bat_multiplier;
+	cfg.bat_low       = s->bat_low;
+	cfg.tach_glitch_filter_us = s->tach_glitch_filter_us;
+	sanitize_cfg();
+}
+
+static void apply_nvs_v11(const struct nvs_settings_v11 *s)
+{
+	cfg.front_obstacle_dist = s->front_obstacle_dist;
+	cfg.side_open_dist      = s->side_open_dist;
+	cfg.all_close_dist      = s->all_close_dist;
+	cfg.close_front_dist    = s->close_front_dist;
+	cfg.pid_kp       = s->pid_kp;
+	cfg.pid_ki       = s->pid_ki;
+	cfg.pid_kd       = s->pid_kd;
+	cfg.min_speed    = s->min_speed;
+	cfg.max_speed    = s->max_speed;
+	cfg.min_bspeed   = s->min_bspeed;
+	cfg.min_point    = s->min_point;
+	cfg.max_point    = s->max_point;
+	cfg.neutral_point = s->neutral_point;
+	cfg.encoder_holes = s->encoder_holes;
+	cfg.wheel_diam_m  = s->wheel_diam_m;
+	cfg.loop_ms       = s->loop_ms;
+	cfg.spd_clear     = s->spd_clear;
+	cfg.spd_blocked   = s->spd_blocked;
+	cfg.spd_slew      = s->spd_slew;
+	cfg.kick_pct      = s->kick_pct;
+	cfg.kick_ms       = s->kick_ms;
+	cfg.corner_kick_us = s->corner_kick_us;
+	cfg.coe_clear     = s->coe_clear;
+	cfg.coe_blocked   = s->coe_blocked;
+	cfg.wrong_dir_deg = s->wrong_dir_deg;
+	cfg.race_cw       = s->race_cw != 0;
+	cfg.stuck_thresh  = s->stuck_thresh;
+	cfg.stall_thresh  = s->stall_thresh;
+	cfg.reverse_brake_cmd = s->reverse_brake_cmd;
+	cfg.reverse_drive_cmd = s->reverse_drive_cmd;
+	cfg.reverse_brake_ms = s->reverse_brake_ms;
+	cfg.reverse_drive_ms = s->reverse_drive_ms;
+	cfg.long_reverse_brake_ms = s->long_reverse_brake_ms;
+	cfg.long_reverse_drive_ms = s->long_reverse_drive_ms;
 	cfg.imu_rotate    = s->imu_rotate != 0;
 	cfg.servo_reverse = s->servo_reverse != 0;
 	cfg.calibrated    = s->calibrated != 0;
@@ -306,25 +548,52 @@ bool settings_load(void)
 		return false;
 	}
 
-	struct nvs_settings s;
-	ssize_t len = nvs_read(&nvs, NVS_KEY_SETTINGS, &s, sizeof(s));
-	if (len != sizeof(s)) {
+	uint8_t buf[sizeof(struct nvs_settings)];
+	ssize_t len = nvs_read(&nvs, NVS_KEY_SETTINGS, buf, sizeof(buf));
+	if (len != sizeof(struct nvs_settings) &&
+	    len != sizeof(struct nvs_settings_v11) &&
+	    len != sizeof(struct nvs_settings_v10)) {
 		LOG_INF("No saved settings (len=%zd)", len);
 		return false;
 	}
 
-	if (s.magic != SETTINGS_MAGIC || s.version != SETTINGS_VERSION) {
+	const struct nvs_settings *s = (const struct nvs_settings *)buf;
+	if (s->magic != SETTINGS_MAGIC) {
 		LOG_WRN("Settings magic/version mismatch");
 		return false;
 	}
 
-	if (compute_checksum(&s) != s.checksum) {
-		LOG_WRN("Settings checksum mismatch");
+	k_mutex_lock(&cfg_mutex, K_FOREVER);
+	if (len == sizeof(struct nvs_settings) && s->version == SETTINGS_VERSION) {
+		if (compute_checksum(s) != s->checksum) {
+			k_mutex_unlock(&cfg_mutex);
+			LOG_WRN("Settings checksum mismatch");
+			return false;
+		}
+		apply_nvs(s);
+	} else if (len == sizeof(struct nvs_settings_v11) &&
+		   s->version == SETTINGS_VERSION_V11) {
+		const struct nvs_settings_v11 *s11 = (const struct nvs_settings_v11 *)buf;
+		if (compute_checksum_v11(s11) != s11->checksum) {
+			k_mutex_unlock(&cfg_mutex);
+			LOG_WRN("Settings v11 checksum mismatch");
+			return false;
+		}
+		apply_nvs_v11(s11);
+	} else if (len == sizeof(struct nvs_settings_v10) &&
+		   s->version == SETTINGS_VERSION_V10) {
+		const struct nvs_settings_v10 *s10 = (const struct nvs_settings_v10 *)buf;
+		if (compute_checksum_v10(s10) != s10->checksum) {
+			k_mutex_unlock(&cfg_mutex);
+			LOG_WRN("Settings v10 checksum mismatch");
+			return false;
+		}
+		apply_nvs_v10(s10);
+	} else {
+		k_mutex_unlock(&cfg_mutex);
+		LOG_WRN("Settings version mismatch");
 		return false;
 	}
-
-	k_mutex_lock(&cfg_mutex, K_FOREVER);
-	apply_nvs(&s);
 	k_mutex_unlock(&cfg_mutex);
 	LOG_INF("Settings loaded from NVS");
 	return true;
