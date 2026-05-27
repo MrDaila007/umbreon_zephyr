@@ -60,6 +60,7 @@ static uint8_t tx_buf[TX_BUF_SIZE];
 static volatile uint16_t tx_head;  /* written by threads (under mutex) */
 static volatile uint16_t tx_tail;  /* written by ISR only */
 static K_MUTEX_DEFINE(tx_mutex);
+static K_MUTEX_DEFINE(cfg_get_mutex);
 
 /* ─── TX overflow ring buffer (absorbs bursts when main ring is full) ───── */
 #define OVF_BUF_SIZE 512
@@ -429,45 +430,43 @@ static bool parse_set_pair(const char *pair)
 static void cmd_get(void)
 {
 	struct car_settings c;
-	settings_get_copy(&c);
+	static char out[768];
 
-	/* Chunk 1: thresholds + PID + ESC */
-	wifi_cmd_printf(
+	settings_get_copy(&c);
+	k_mutex_lock(&cfg_get_mutex, K_FOREVER);
+
+	snprintf(out, sizeof(out),
 		"$CFG:FOD=%d,SOD=%d,ACD=%d,CFD=%d"
 		",KP=%.4f,KI=%.4f,KD=%.4f"
 		",MSP=%d,XSP=%d,BSP=%d"
-		",MNP=%d,XNP=%d,NTP=%d",
+		",MNP=%d,XNP=%d,NTP=%d"
+		",ENH=%d,WDM=%.4f,LMS=%d"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d"
+		",COE1=%.2f,COE2=%.2f"
+		",WDD=%.1f,RCW=%d,STK=%d,STL=%d"
+		",IMR=%d,SVR=%d,CAL=%d"
+		",BEN=%d,BML=%.4f,BLV=%.1f"
+		",TGF=%d"
+		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
 		c.front_obstacle_dist, c.side_open_dist,
 		c.all_close_dist, c.close_front_dist,
 		(double)c.pid_kp, (double)c.pid_ki, (double)c.pid_kd,
 		c.min_speed, c.max_speed, c.min_bspeed,
-		c.min_point, c.max_point, c.neutral_point);
-
-	/* Chunk 2: tachometer + speed + navigation */
-	wifi_cmd_printf(
-		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d"
-		",COE1=%.2f,COE2=%.2f"
-		",WDD=%.1f,RCW=%d,STK=%d,STL=%d",
+		c.min_point, c.max_point, c.neutral_point,
 		c.encoder_holes, (double)c.wheel_diam_m, c.loop_ms,
 		(double)c.spd_clear, (double)c.spd_blocked,
 		(double)c.spd_slew,
 		(double)c.kick_pct, c.kick_ms,
 		(double)c.coe_clear, (double)c.coe_blocked,
 		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0,
-		c.stuck_thresh, c.stall_thresh);
-
-	/* Chunk 3: flags + system info */
-	wifi_cmd_printf(
-		",IMR=%d,SVR=%d,CAL=%d"
-		",BEN=%d,BML=%.4f,BLV=%.1f"
-		",TGF=%d"
-		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
+		c.stuck_thresh, c.stall_thresh,
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
 		(double)c.bat_low, c.tach_glitch_filter_us,
 		SENSOR_COUNT, MAX_SENSOR_RANGE);
+	wifi_cmd_send(out);
+	k_mutex_unlock(&cfg_get_mutex);
 }
 
 /* ─── SET command ─────────────────────────────────────────────────────────── */
@@ -517,7 +516,7 @@ static void cmd_diag(void)
 {
 	wifi_cmd_printf(
 		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f"
-		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f\n",
+		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,SNR=%u\n",
 		sensors_online_count(),
 		imu_is_ok() ? 1 : 0,
 		k_uptime_get(),
@@ -525,15 +524,17 @@ static void cmd_diag(void)
 		control_is_running() ? 1 : 0,
 		0, /* drv_enabled is static in control.c */
 		taho_get_count(),
-		(double)taho_get_speed());
+		(double)taho_get_speed(),
+		(unsigned int)sensors_restart_count());
 }
 
 static void cmd_sns(void)
 {
 	int *s = sensors_poll();
-	wifi_cmd_printf("$SNS:%d,%d,%d,%d,%d,%d,online=%d\n",
+	wifi_cmd_printf("$SNS:%d,%d,%d,%d,%d,%d,online=%d,restarts=%u\n",
 			s[0], s[1], s[2], s[3], s[4], s[5],
-			sensors_online_count());
+			sensors_online_count(),
+			(unsigned int)sensors_restart_count());
 }
 
 static void cmd_imu(void)

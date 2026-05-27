@@ -21,6 +21,10 @@ BOOT_MARKERS = ("$BOOT", "BOOT", "Zephyr")
 FAULT_MARKERS = ("USAGE FAULT", "HARD FAULT", "FATAL", "ASSERT", "panic", "Kernel panic", "<err>")
 
 
+class StopLogging(Exception):
+    """Raised when robot telemetry says the run has stopped."""
+
+
 @dataclass
 class Sample:
     line_no: int
@@ -123,6 +127,7 @@ class WebSocketLink(Link):
         if b" 101 " not in resp and b" 101\r\n" not in resp:
             raise ConnectionError("WebSocket upgrade failed")
         self.sock.setblocking(False)
+        self.buf = b""
 
     def send_line(self, command: str) -> None:
         payload = (command if command.endswith("\n") else command + "\n").encode("ascii", errors="replace")
@@ -141,35 +146,45 @@ class WebSocketLink(Link):
             return lines
         while True:
             try:
-                header = self.sock.recv(2)
+                chunk = self.sock.recv(4096)
             except BlockingIOError:
                 break
-            if not header:
+            if not chunk:
                 raise ConnectionError("WebSocket connection closed")
-            if len(header) < 2:
+            self.buf += chunk
+            if len(chunk) < 4096:
                 break
-            opcode = header[0] & 0x0F
-            length = header[1] & 0x7F
+
+        while len(self.buf) >= 2:
+            opcode = self.buf[0] & 0x0F
+            masked = (self.buf[1] & 0x80) != 0
+            length = self.buf[1] & 0x7F
+            header_len = 2
             if length == 126:
-                length = struct.unpack("!H", self._recv_exact(2))[0]
+                if len(self.buf) < 4:
+                    break
+                length = struct.unpack("!H", self.buf[2:4])[0]
+                header_len = 4
             elif length == 127:
-                length = struct.unpack("!Q", self._recv_exact(8))[0]
-            payload = self._recv_exact(length)
+                if len(self.buf) < 10:
+                    break
+                length = struct.unpack("!Q", self.buf[2:10])[0]
+                header_len = 10
+            mask_len = 4 if masked else 0
+            frame_len = header_len + mask_len + length
+            if len(self.buf) < frame_len:
+                break
+            payload = self.buf[header_len + mask_len:frame_len]
+            if masked:
+                key = self.buf[header_len:header_len + 4]
+                payload = bytes(b ^ key[i % 4] for i, b in enumerate(payload))
+            self.buf = self.buf[frame_len:]
             if opcode == 0x1:
                 text = payload.decode("utf-8", errors="replace")
                 lines.extend(text.rstrip("\r\n").splitlines())
-            if len(payload) == 0:
-                break
+            elif opcode == 0x8:
+                raise ConnectionError("WebSocket close frame received")
         return lines
-
-    def _recv_exact(self, n: int) -> bytes:
-        out = b""
-        while len(out) < n:
-            chunk = self.sock.recv(n - len(out))
-            if not chunk:
-                raise ConnectionError("WebSocket connection closed")
-            out += chunk
-        return out
 
     def close(self) -> None:
         self.sock.close()
@@ -274,17 +289,40 @@ def send(link: Link, raw_log, command: str, mirror: bool) -> None:
     link.send_line(command)
 
 
-def drain(link: Link, raw_log, lines: list[str], until: float, mirror: bool) -> None:
+def should_stop_on_line(line: str, state: dict[str, bool]) -> bool:
+    if line.startswith("$STS:RUN") or line.startswith("$STS:STARTING"):
+        state["active_seen"] = True
+    elif line.startswith("$RUN:") or CSV_RE.match(line):
+        state["active_seen"] = True
+    elif line.startswith("$STS:STOP") and state.get("active_seen", False):
+        state["stop_seen"] = True
+        return True
+    return False
+
+
+def drain(
+    link: Link,
+    raw_log,
+    lines: list[str],
+    until: float,
+    mirror: bool,
+    state: dict[str, bool],
+    stop_on_status: bool,
+) -> None:
     while time.monotonic() < until:
         for line in link.read_available(0.1):
             raw_log.write(line + "\n")
             lines.append(line)
             if mirror:
                 print(line)
+            stopped = should_stop_on_line(line, state)
+            if stop_on_status and stopped:
+                raw_log.flush()
+                raise StopLogging("robot reported $STS:STOP")
     raw_log.flush()
 
 
-def write_summary(path: Path, args, summary: Summary, raw_log: Path) -> None:
+def write_summary(path: Path, args, summary: Summary, raw_log: Path, stop_reason: str) -> None:
     mean_abs_error = (
         summary.speed_error_abs_sum / summary.speed_error_count
         if summary.speed_error_count else None
@@ -295,6 +333,7 @@ def write_summary(path: Path, args, summary: Summary, raw_log: Path) -> None:
         "transport": args.transport,
         "duration_s": args.duration,
         "started_by_logger": args.start,
+        "stop_reason": stop_reason,
         "analysis": {
             "lines": summary.lines,
             "csv_valid": summary.csv_valid,
@@ -338,7 +377,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--status-interval", type=float, default=5.0)
     parser.add_argument("--gap-ms", type=int, default=250)
     parser.add_argument("--start", action="store_true", help="send $START after reading settings")
-    parser.add_argument("--no-stop", action="store_true", help="do not send $STOP at the end")
+    parser.add_argument("--no-stop", action="store_true", help="do not send $STOP when logging ends")
+    parser.add_argument("--no-stop-on-status", action="store_true", help="keep logging after external $STS:STOP")
     parser.add_argument("--command", action="append", default=[], help="extra command before RUN, for example '$SET:TGF=500'")
     parser.add_argument("--raw-log", type=Path, default=Path("/tmp/umbreon_wifi_run.log"))
     parser.add_argument("--summary", type=Path, default=Path("/tmp/umbreon_wifi_run.json"))
@@ -353,34 +393,52 @@ def main() -> int:
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     link: Link | None = None
     lines: list[str] = []
+    state = {"active_seen": False, "stop_seen": False}
+    stop_reason = "duration"
     try:
         link = TcpLink(args.host, port, args.connect_timeout) if args.transport == "tcp" else WebSocketLink(args.host, port, args.connect_timeout)
         with args.raw_log.open("w", encoding="utf-8", errors="replace") as raw_log:
-            for command in ("$GET", "$STATUS", "$BAT", "$PID", "$SYS", "$DIAG"):
-                send(link, raw_log, command, args.mirror)
-                drain(link, raw_log, lines, time.monotonic() + 0.35, args.mirror)
-            drain(link, raw_log, lines, time.monotonic() + args.prelude_s, args.mirror)
-            for command in args.command:
-                send(link, raw_log, command, args.mirror)
-                drain(link, raw_log, lines, time.monotonic() + 0.5, args.mirror)
-            if args.start:
-                send(link, raw_log, "$START", args.mirror)
-            end = time.monotonic() + args.duration
-            next_pid = time.monotonic() + args.pid_interval
-            next_status = time.monotonic() + args.status_interval
-            while time.monotonic() < end:
-                now = time.monotonic()
-                if args.pid_interval > 0 and now >= next_pid:
-                    send(link, raw_log, "$PID", args.mirror)
-                    next_pid = now + args.pid_interval
-                if args.status_interval > 0 and now >= next_status:
-                    send(link, raw_log, "$STATUS", args.mirror)
-                    send(link, raw_log, "$BAT", args.mirror)
-                    next_status = now + args.status_interval
-                drain(link, raw_log, lines, min(end, now + 0.2), args.mirror)
-            if args.start and not args.no_stop:
-                send(link, raw_log, "$STOP", args.mirror)
-                drain(link, raw_log, lines, time.monotonic() + 1.5, args.mirror)
+            try:
+                for command in ("$GET", "$STATUS", "$BAT", "$PID", "$SYS", "$DIAG"):
+                    send(link, raw_log, command, args.mirror)
+                    drain(link, raw_log, lines, time.monotonic() + 0.35, args.mirror,
+                          state, False)
+                drain(link, raw_log, lines, time.monotonic() + args.prelude_s, args.mirror,
+                      state, False)
+                for command in args.command:
+                    send(link, raw_log, command, args.mirror)
+                    drain(link, raw_log, lines, time.monotonic() + 0.5, args.mirror,
+                          state, not args.no_stop_on_status)
+                if args.start:
+                    send(link, raw_log, "$START", args.mirror)
+                end = time.monotonic() + args.duration
+                next_pid = time.monotonic() + args.pid_interval
+                next_status = time.monotonic() + args.status_interval
+                while time.monotonic() < end:
+                    now = time.monotonic()
+                    if args.pid_interval > 0 and now >= next_pid:
+                        send(link, raw_log, "$PID", args.mirror)
+                        next_pid = now + args.pid_interval
+                    if args.status_interval > 0 and now >= next_status:
+                        send(link, raw_log, "$STATUS", args.mirror)
+                        send(link, raw_log, "$BAT", args.mirror)
+                        next_status = now + args.status_interval
+                    drain(link, raw_log, lines, min(end, now + 0.2), args.mirror,
+                          state, not args.no_stop_on_status)
+            except StopLogging as exc:
+                stop_reason = str(exc)
+            except (ConnectionError, ConnectionResetError, BrokenPipeError, OSError) as exc:
+                stop_reason = f"connection closed: {exc}"
+            except KeyboardInterrupt:
+                stop_reason = "interrupted"
+            finally:
+                if not args.no_stop and not state.get("stop_seen", False):
+                    try:
+                        send(link, raw_log, "$STOP", args.mirror)
+                        drain(link, raw_log, lines, time.monotonic() + 1.5, args.mirror,
+                              state, False)
+                    except (ConnectionError, ConnectionResetError, BrokenPipeError, OSError):
+                        pass
     finally:
         if link is not None:
             link.close()
@@ -389,9 +447,10 @@ def main() -> int:
         lines = [line for line in args.raw_log.read_text(errors="ignore").splitlines()
                  if not line.startswith("> ")]
     summary = analyze(lines, args.gap_ms)
-    write_summary(args.summary, args, summary, args.raw_log)
+    write_summary(args.summary, args, summary, args.raw_log, stop_reason)
     print(f"raw_log={args.raw_log}")
     print(f"summary={args.summary}")
+    print(f"stop_reason={stop_reason}")
     print(
         "csv_valid={csv} run_lines={run} pid={pid} max_speed={speed:.2f} max_target={target:.2f} bat_min={bat}".format(
             csv=summary.csv_valid,
