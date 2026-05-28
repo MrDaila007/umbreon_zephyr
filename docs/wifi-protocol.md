@@ -215,3 +215,85 @@ Sensor distance units match `$SNS` output and current firmware constants
 
 Read-only keys appended on `$GET` (not writable via `$SET`): `IMU`, `DBG`, `SNS`,
 `SMX`, `FWV`.
+
+---
+
+## Internal Bridge Protocol (Pico ↔ ESP)
+
+These messages are exchanged directly between the RP2350 (Pico) and the
+ESP8266 over UART1. They are **never forwarded** to TCP/WebSocket clients.
+
+### Status Poll
+
+The Pico sends `#WIFISTATUS\n` every 10 s (on the k_poll timeout). The ESP
+intercepts it and replies with a multi-line block:
+
+```
+# Mode: STA
+# SSID: <hex>
+# IP: 192.168.1.42
+# RSSI: -65
+# Status: ready
+```
+
+In AP mode the `# RSSI:` line is omitted and IP is the AP gateway address
+(`192.168.4.1` by default).
+
+The `# SSID:` value is XOR-encrypted with the shared PSK and hex-encoded (see
+Cipher section below). The Pico decrypts it and stores the plain SSID in
+`ws_ssid`. The IP is stored as-is in `ws_ip`.
+
+Pico getters updated on every poll:
+
+| Function | Returns |
+|----------|---------|
+| `wifi_status_is_ready()` | `true` when `# Status: ready` |
+| `wifi_status_is_ap()` | `true` when `# Mode: AP` |
+| `wifi_status_get_rssi()` | RSSI dBm (0 in AP mode) |
+| `wifi_status_get_ssid()` | Decrypted SSID string |
+| `wifi_status_get_ip()` | IP address string |
+
+### Credential Provisioning
+
+To change the ESP WiFi credentials at runtime, call `wifi_cfg_set(ssid, pass)`
+from the Pico (must be called from the `wifi_cmd` thread, e.g. inside
+`dispatch_command`).
+
+**Wire format:**
+
+```
+$WIFICFG:<hex>\n
+```
+
+where `<hex>` = `cfg_to_hex(cfg_xor("ssid\tpassword"))`.
+
+The payload before encryption is `ssid` + tab (`\t`) + `password`, up to
+96 bytes (32 SSID + 1 tab + 63 password). Maximum hex length: 192 chars.
+
+**Retry behaviour:** The Pico retransmits on each 10 s timeout until it
+receives `$WIFICFG:ACK`, up to `CFG_MAX_RETRIES` (5) attempts. On NAK or after
+all retries the counter is cleared.
+
+**ESP response:**
+
+| Response | Meaning |
+|----------|---------|
+| `$WIFICFG:ACK\r\n` | Credentials saved to NVS; ESP restarts in ~300 ms |
+| `$WIFICFG:NAK\r\n` | Payload malformed (invalid hex or missing tab separator) |
+
+After restart the ESP reads the NVS override (`wifi_ovrd` namespace) on boot
+with priority over compile-time credentials (`wifi_config.h`).
+
+### Cipher (`wifi_cipher.h`)
+
+The header `src/wifi_cipher.h` (identical copy in `umbreon_esp_web/main/`)
+provides three static inline helpers used by both firmwares:
+
+| Function | Description |
+|----------|-------------|
+| `cfg_xor(in, out, n)` | XOR stream with 16-byte PSK; same operation for encrypt/decrypt |
+| `cfg_to_hex(data, n, out, sz)` | Encode bytes as lowercase hex |
+| `cfg_from_hex(s, out, max)` | Decode hex string to bytes |
+
+The PSK (`CFG_PSK[16]`) must be identical in both builds. Rotate by editing
+both headers together.

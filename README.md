@@ -298,7 +298,7 @@ shown in yellow. Real overlaps are red and block CI.
 | Thread | Priority | Stack | Period | Purpose |
 |--------|----------|-------|--------|---------|
 | control | 2 | 4096B | 40ms | Sensors, PID, steering, detection |
-| display | 3 | 2048B | 120ms | SSD1306 screen rendering |
+| display | 3 | 4096B | 120ms | SSD1306 screen rendering (dashboard, menu, settings, info, WiFi) |
 | wifi_cmd | 5 | 2048B | event | UART command parsing, WiFi status polling |
 | battery | 10 | 1024B | 500ms | Battery ADC monitoring |
 | main | — | 4096B | — | Init, then sleeps forever |
@@ -315,6 +315,7 @@ shown in yellow. Real overlaps are red and block CI.
 | `tachometer.c/h` | GPIO ISR, speed calculation |
 | `control.c/h` | Main control loop: wall-follow, stuck detection |
 | `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge), WiFi status state |
+| `wifi_cipher.h` | Shared XOR+hex cipher for Pico↔ESP credential exchange |
 | `settings.c/h` | NVS storage for 31 configurable parameters |
 | `battery.c/h` | ADC monitoring, low-voltage cutoff |
 | `tests.c/h` | 8 diagnostic test routines |
@@ -323,10 +324,15 @@ shown in yellow. Real overlaps are red and block CI.
 | `display_hal.c/h` | u8g2 HAL — bit-bang I2C to SSD1306 |
 | `screens/screen_dashboard.c` | Main dashboard: battery, sensor bars, IMU scale, WiFi strip |
 | `screens/screen_info.c` | Info screen: firmware version, sensor status |
+| `screens/screen_wifi.c` | WiFi status screen: mode, SSID, IP, RSSI, connection status |
 
 ## WiFi Protocol
 
 All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, terminated with `\n`.
+
+The internal Pico↔ESP bridge protocol (`#WIFISTATUS` polling, `$WIFICFG` credential
+provisioning, XOR+hex cipher) is documented in
+[docs/wifi-protocol.md](docs/wifi-protocol.md#internal-bridge-protocol-pico--esp).
 
 ### Control
 
@@ -370,6 +376,7 @@ All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, 
 | `$SYS` | System info (uptime, settings) |
 | `$LOG:ON/OFF` | Toggle debug log forwarding (`$L:...` prefix) |
 | `$HELP` | List all available commands |
+| `$WIFICFG:ACK` / `$WIFICFG:NAK` | ESP acknowledges credential update (internal) |
 
 ### Track Learning
 
