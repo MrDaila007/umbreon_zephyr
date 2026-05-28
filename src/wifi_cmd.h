@@ -19,3 +19,8 @@ void wifi_log(const char *fmt, ...);
 
 /* Check if WiFi logging is enabled */
 bool wifi_log_enabled(void);
+
+/* WiFi connection state — updated from ESP #WIFISTATUS replies */
+bool wifi_status_is_ready(void);
+bool wifi_status_is_ap(void);
+int  wifi_status_get_rssi(void);

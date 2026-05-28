@@ -73,6 +73,11 @@ static volatile uint16_t ovf_tail;  /* written by ISR only */
 /* ─── Debug log flag ──────────────────────────────────────────────────────── */
 static volatile bool log_on;
 
+/* ─── WiFi connection state (parsed from ESP #WIFISTATUS replies) ────────── */
+static volatile bool ws_ready;
+static volatile bool ws_is_ap;
+static volatile int  ws_rssi;
+
 /* ─── Thread ──────────────────────────────────────────────────────────────── */
 #define WIFI_STACK_SIZE 2048
 #define WIFI_PRIORITY   5
@@ -85,6 +90,25 @@ static K_THREAD_STACK_DEFINE(debug_uart_stack, DEBUG_UART_STACK_SIZE);
 static struct k_thread debug_uart_thread_data;
 
 static K_MUTEX_DEFINE(debug_uart_tx_mutex);
+
+static void parse_wifi_status_line(const char *line)
+{
+	/* line format: "# Key:  value" (from wifi_manager_get_status on ESP) */
+	const char *rest = line + 2; /* skip leading "# " */
+	if (strncmp(rest, "Mode:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		ws_is_ap = (strncmp(val, "AP", 2) == 0);
+	} else if (strncmp(rest, "RSSI:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		ws_rssi = atoi(val);
+	} else if (strncmp(rest, "Status:", 7) == 0) {
+		const char *val = rest + 7;
+		while (*val == ' ') val++;
+		ws_ready = (strncmp(val, "ready", 5) == 0);
+	}
+}
 
 static void dispatch_command(const char *line);
 
@@ -784,7 +808,11 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 	};
 
 	while (1) {
-		k_poll(poll_events, 2, K_FOREVER);
+		int poll_ret = k_poll(poll_events, 2, K_SECONDS(10));
+		if (poll_ret == -EAGAIN) {
+			wifi_cmd_send("#WIFISTATUS\n");
+			continue;
+		}
 
 		/* Reset poll event states */
 		poll_events[0].state = K_POLL_STATE_NOT_READY;
@@ -799,6 +827,9 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 						cmd_buf[cmd_len] = '\0';
 						if (cmd_buf[0] == '$') {
 							dispatch_command(cmd_buf);
+						} else if (cmd_buf[0] == '#' && cmd_len >= 2 &&
+							   cmd_buf[1] == ' ') {
+							parse_wifi_status_line(cmd_buf);
 						}
 						cmd_len = 0;
 					}
@@ -884,3 +915,7 @@ void wifi_cmd_init(void)
 
 	LOG_INF("WiFi CMD init (UART1 GP4/GP5 + UART0 GP16/GP17 debug, 115200)");
 }
+
+bool wifi_status_is_ready(void) { return ws_ready; }
+bool wifi_status_is_ap(void)    { return ws_is_ap; }
+int  wifi_status_get_rssi(void) { return ws_rssi; }
