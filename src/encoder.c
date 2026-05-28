@@ -23,7 +23,7 @@ static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw)
 #define ENCODER_STACK_SIZE 1024
 #define ENCODER_PRIORITY   5
 #define ENCODER_POLL_MS    1
-#define ENCODER_REVERSE    true
+#define ENCODER_REVERSE    false   /* Set to true to reverse rotation direction */	
 
 #define ENC_BTN_DEBOUNCE_MS 50
 #define ENC_BTN_CLICK_MS    500
