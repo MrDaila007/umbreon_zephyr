@@ -26,10 +26,10 @@
 #define STATUS_Y       0
 #define SENSOR_Y      10
 #define SENSOR_H      22   /* bar height in pixels */
-#define IMU_Y         36
-#define IMU_SCALE_Y   40   /* tick line y */
-#define IMU_MARKER_Y  41   /* marker top */
-#define IMU_VALUE_Y   53   /* numeric value baseline (5×7 font) */
+#define IMU_Y         45   /* separator drawn at IMU_Y-2 = IMU_SCALE_Y = 43 */
+#define IMU_SCALE_Y   43   /* tick line y  (+3 so ticks clear sensor labels) */
+#define IMU_MARKER_Y  44   /* marker top */
+#define IMU_LABEL_Y   55   /* tick degree-label baseline */
 
 #define BAR_W          8   /* each sensor bar width */
 #define BAR_GAP        4   /* gap between bars */
@@ -123,35 +123,40 @@ static void draw_sensor_bars(void)
 	}
 }
 
-/* ─── IMU horizontal scale ───────────────────────────────────────────────── */
-static void draw_imu_scale(void)
+/* ─── IMU inline value (drawn in sensor-label row center gap) ────────────── */
+static void draw_imu_value_inline(float yaw)
 {
-	float yaw = imu_get_heading();
+	char buf[8];
+	snprintf(buf, sizeof(buf), "%.1f", (double)yaw);
+	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+	int vw = (int)u8g2_GetStrWidth(&u8g2, buf);
+	u8g2_DrawStr(&u8g2, (SCR_W - vw) / 2,
+		     SENSOR_Y + SENSOR_H + 7, buf);
+}
 
-	/* Clamp to ±90° for display */
-	if (yaw >  90.0f) yaw =  90.0f;
-	if (yaw < -90.0f) yaw = -90.0f;
-
+/* ─── IMU horizontal scale ───────────────────────────────────────────────── */
+static void draw_imu_scale(float yaw)
+{
 	/* Baseline */
 	u8g2_DrawHLine(&u8g2, 0, IMU_SCALE_Y, SCR_W);
 
-	/* Tick marks at -90, -45, 0, +45, +90 (no text labels — space for WiFi strip) */
-	const int ticks[] = {-90, -45, 0, 45, 90};
+	/* Tick marks + degree labels below */
+	static const int   ticks[]  = {-90, -45, 0, 45, 90};
+	static const char *t_lbl[]  = {"-90", "-45", "0", "45", "90"};
+	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 	for (int i = 0; i < 5; i++) {
 		int tx = CENTER_X + (int)(ticks[i] * IMU_HALF_W / 90);
 		u8g2_DrawVLine(&u8g2, tx, IMU_SCALE_Y - 3, 6);
+		int lw = (int)u8g2_GetStrWidth(&u8g2, t_lbl[i]);
+		int lx = tx - lw / 2;
+		if (lx < 0)           lx = 0;
+		if (lx + lw > SCR_W)  lx = SCR_W - lw;
+		u8g2_DrawStr(&u8g2, lx, IMU_LABEL_Y, t_lbl[i]);
 	}
 
-	/* Sliding marker */
+	/* 3×3 dot marker */
 	int mx = CENTER_X + (int)(yaw * IMU_HALF_W / 90.0f);
-	u8g2_DrawBox(&u8g2, mx - 2, IMU_MARKER_Y, 5, 5);
-
-	/* Numeric value — 5×7 font, baseline IMU_VALUE_Y */
-	char buf[12];
-	snprintf(buf, sizeof(buf), "%.1f", (double)yaw);
-	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
-	int vw = u8g2_GetStrWidth(&u8g2, buf);
-	u8g2_DrawStr(&u8g2, (SCR_W - vw) / 2, IMU_VALUE_Y, buf);
+	u8g2_DrawBox(&u8g2, mx - 1, IMU_MARKER_Y, 3, 3);
 }
 
 /* ─── WiFi status strip ──────────────────────────────────────────────────── */
@@ -204,11 +209,16 @@ static void draw_wifi_strip(void)
 /* ─── Public entry point ─────────────────────────────────────────────────── */
 void screen_dashboard_draw(void)
 {
+	float yaw = imu_get_heading();
+	if (yaw >  90.0f) yaw =  90.0f;
+	if (yaw < -90.0f) yaw = -90.0f;
+
 	draw_status_bar();
 	u8g2_DrawHLine(&u8g2, 0, 8, SCR_W);
 	draw_sensor_bars();
+	draw_imu_value_inline(yaw);
 	u8g2_DrawHLine(&u8g2, 0, IMU_Y - 2, SCR_W);
-	draw_imu_scale();
+	draw_imu_scale(yaw);
 	draw_wifi_strip();
 
 	u8g2_SendBuffer(&u8g2);
