@@ -44,4 +44,5 @@ target_sources(app PRIVATE
     src/screens/screen_actions.c
     src/screens/screen_confirm.c
     src/screens/screen_info.c
+    src/screens/screen_wifi.c
 )
