@@ -253,6 +253,19 @@ make test-host              # host unit tests only (no hardware)
 make test-ztest             # Zephyr ztest on native_sim
 ```
 
+### Check display UI
+
+Renders the 128×64 dashboard at 4× scale using the project's own BDF font
+and checks every pixel for zone overlaps. Exits 0 if clean, 1 on real conflicts.
+Saves `tools/sim_dashboard.png` (three WiFi scenarios side-by-side).
+
+```bash
+make check-ui               # requires: pip install pillow
+```
+
+Intentional overlaps (tick marks crossing the IMU baseline) are whitelisted and
+shown in yellow. Real overlaps are red and block CI.
+
 ### Makefile targets reference
 
 | Target | Description |
@@ -276,6 +289,7 @@ make test-ztest             # Zephyr ztest on native_sim
 | `make hil-smoke` | Safe real-hardware command/telemetry smoke test |
 | `make hil-endurance` | RUN endurance test with reboot/fault detection |
 | `make hil-motor` | Bench motor HIL test (requires lifted wheels) |
+| `make check-ui` | Run display overlap checker; saves `tools/sim_dashboard.png` |
 
 ## Architecture
 
@@ -284,7 +298,8 @@ make test-ztest             # Zephyr ztest on native_sim
 | Thread | Priority | Stack | Period | Purpose |
 |--------|----------|-------|--------|---------|
 | control | 2 | 4096B | 40ms | Sensors, PID, steering, detection |
-| wifi_cmd | 5 | 2048B | event | UART command parsing |
+| display | 3 | 2048B | 120ms | SSD1306 screen rendering |
+| wifi_cmd | 5 | 2048B | event | UART command parsing, WiFi status polling |
 | battery | 10 | 1024B | 500ms | Battery ADC monitoring |
 | main | — | 4096B | — | Init, then sleeps forever |
 | Tachometer ISR | ISR | — | edge | Pulse counting |
@@ -299,11 +314,15 @@ make test-ztest             # Zephyr ztest on native_sim
 | `imu.c/h` | MPU-6050 gyro Z, calibration, heading integration |
 | `tachometer.c/h` | GPIO ISR, speed calculation |
 | `control.c/h` | Main control loop: wall-follow, stuck detection |
-| `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge) |
+| `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge), WiFi status state |
 | `settings.c/h` | NVS storage for 31 configurable parameters |
 | `battery.c/h` | ADC monitoring, low-voltage cutoff |
 | `tests.c/h` | 8 diagnostic test routines |
 | `track_learn.c/h` | Track profile recording and race replay |
+| `display.c/h` | Display thread, screen state machine (dashboard / menu) |
+| `display_hal.c/h` | u8g2 HAL — bit-bang I2C to SSD1306 |
+| `screens/screen_dashboard.c` | Main dashboard: battery, sensor bars, IMU scale, WiFi strip |
+| `screens/screen_info.c` | Info screen: firmware version, sensor status |
 
 ## WiFi Protocol
 
