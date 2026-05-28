@@ -11,6 +11,9 @@
 #include "zephyr_stubs.h"
 #include "test_runner.h"
 
+/* wifi_cipher.h is a header-only library of static inline helpers */
+#include "../src/wifi_cipher.h"
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Extracted functions under test (copies of static inlines from src/)
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -747,6 +750,8 @@ TEST(test_stuck_sensor_confirmed_still_works)
 static volatile bool test_ws_ready;
 static volatile bool test_ws_is_ap;
 static volatile int  test_ws_rssi;
+static char          test_ws_ssid[33];
+static char          test_ws_ip[16];
 
 static void test_parse_wifi_status_line(const char *line)
 {
@@ -763,6 +768,21 @@ static void test_parse_wifi_status_line(const char *line)
 		const char *val = rest + 7;
 		while (*val == ' ') val++;
 		test_ws_ready = (strncmp(val, "ready", 5) == 0);
+	} else if (strncmp(rest, "SSID:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		uint8_t enc[33], plain[33];
+		int n = cfg_from_hex(val, enc, sizeof(enc) - 1);
+		if (n > 0) {
+			cfg_xor(enc, plain, (size_t)n);
+			plain[n] = '\0';
+			memcpy(test_ws_ssid, plain, (size_t)n + 1);
+		}
+	} else if (strncmp(rest, "IP:", 3) == 0) {
+		const char *val = rest + 3;
+		while (*val == ' ') val++;
+		strncpy(test_ws_ip, val, sizeof(test_ws_ip) - 1);
+		test_ws_ip[sizeof(test_ws_ip) - 1] = '\0';
 	}
 }
 
@@ -823,7 +843,8 @@ TEST(test_wifi_parse_unknown_key_ignored)
 	test_ws_ready = false;
 	test_ws_rssi  = -55;
 	test_ws_is_ap = true;
-	test_parse_wifi_status_line("# SSID:  umbreon");
+	/* UNKNOWN: is a key that doesn't match any handler — state unchanged */
+	test_parse_wifi_status_line("# UNKNOWN: whatever");
 	ASSERT_FALSE(test_ws_ready);
 	ASSERT_EQ(test_ws_rssi, -55);
 	ASSERT_TRUE(test_ws_is_ap);
@@ -857,6 +878,89 @@ TEST(test_rssi_bars_none)
 {
 	ASSERT_EQ(test_rssi_to_bars(-91), 0);
 	ASSERT_EQ(test_rssi_to_bars(-100), 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: wifi_cipher (cfg_xor / cfg_to_hex / cfg_from_hex)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_cipher_xor_roundtrip)
+{
+	const char *plain = "MySSID\tMyPassword";
+	size_t n = strlen(plain);
+	uint8_t enc[64], dec[64];
+	cfg_xor((const uint8_t *)plain, enc, n);
+	cfg_xor(enc, dec, n);
+	dec[n] = '\0';
+	ASSERT_TRUE(memcmp(dec, plain, n) == 0);
+}
+
+TEST(test_cipher_hex_encode_decode_roundtrip)
+{
+	const uint8_t data[] = {0xA3, 0x00, 0xFF, 0x7F, 0x01};
+	char hex[16];
+	cfg_to_hex(data, sizeof(data), hex, sizeof(hex));
+	uint8_t out[5];
+	int n = cfg_from_hex(hex, out, sizeof(out));
+	ASSERT_EQ(n, 5);
+	ASSERT_TRUE(memcmp(out, data, 5) == 0);
+}
+
+TEST(test_cipher_full_cycle)
+{
+	/* Encode ssid+pass → hex, then decode → compare original */
+	const char *ssid = "RoboNet";
+	const char *pass  = "secret42";
+	char plain[100];
+	int n = snprintf(plain, sizeof(plain), "%s\t%s", ssid, pass);
+	uint8_t enc[100];
+	cfg_xor((const uint8_t *)plain, enc, (size_t)n);
+	char hex[200];
+	cfg_to_hex(enc, (size_t)n, hex, sizeof(hex));
+
+	/* Decode */
+	uint8_t enc2[100], plain2[101];
+	int m = cfg_from_hex(hex, enc2, sizeof(enc2));
+	ASSERT_EQ(m, n);
+	cfg_xor(enc2, plain2, (size_t)m);
+	plain2[m] = '\0';
+	ASSERT_TRUE(strcmp((char *)plain2, plain) == 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: parse_wifi_status_line — SSID cipher decode and IP
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_wifi_parse_ssid_cipher_roundtrip)
+{
+	/* Encrypt "HomeNet", hex-encode it, put it in a status line */
+	const char *ssid = "HomeNet";
+	size_t n = strlen(ssid);
+	uint8_t enc[33];
+	char hex[67];
+	cfg_xor((const uint8_t *)ssid, enc, n);
+	cfg_to_hex(enc, n, hex, sizeof(hex));
+
+	char line[128];
+	snprintf(line, sizeof(line), "# SSID: %s", hex);
+
+	memset(test_ws_ssid, 0, sizeof(test_ws_ssid));
+	test_parse_wifi_status_line(line);
+	ASSERT_TRUE(strcmp(test_ws_ssid, ssid) == 0);
+}
+
+TEST(test_wifi_parse_ip)
+{
+	memset(test_ws_ip, 0, sizeof(test_ws_ip));
+	test_parse_wifi_status_line("# IP: 192.168.1.42");
+	ASSERT_TRUE(strcmp(test_ws_ip, "192.168.1.42") == 0);
+}
+
+TEST(test_wifi_parse_ip_zeroes)
+{
+	memset(test_ws_ip, 0, sizeof(test_ws_ip));
+	test_parse_wifi_status_line("# IP: 0.0.0.0");
+	ASSERT_TRUE(strcmp(test_ws_ip, "0.0.0.0") == 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -959,6 +1063,16 @@ int main(void)
 	RUN_TEST(test_rssi_bars_fair);
 	RUN_TEST(test_rssi_bars_poor);
 	RUN_TEST(test_rssi_bars_none);
+
+	printf("\n[wifi_cipher]\n");
+	RUN_TEST(test_cipher_xor_roundtrip);
+	RUN_TEST(test_cipher_hex_encode_decode_roundtrip);
+	RUN_TEST(test_cipher_full_cycle);
+
+	printf("\n[parse_wifi_status_line — SSID+IP]\n");
+	RUN_TEST(test_wifi_parse_ssid_cipher_roundtrip);
+	RUN_TEST(test_wifi_parse_ip);
+	RUN_TEST(test_wifi_parse_ip_zeroes);
 
 	TEST_SUMMARY();
 }

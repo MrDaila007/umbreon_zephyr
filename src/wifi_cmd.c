@@ -27,6 +27,8 @@
 #include "display_hal.h"
 #include "encoder.h"
 
+#include "wifi_cipher.h"
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
@@ -77,6 +79,14 @@ static volatile bool log_on;
 static volatile bool ws_ready;
 static volatile bool ws_is_ap;
 static volatile int  ws_rssi;
+static char          ws_ssid[33]; /* decrypted SSID from last #WIFISTATUS */
+static char          ws_ip[16];   /* IP address from last #WIFISTATUS */
+
+/* ─── $WIFICFG pending state ──────────────────────────────────────────────── */
+#define CFG_MAX_RETRIES 5
+/* hex-encoded encrypted payload: max 96 bytes payload → 192 hex chars + NUL */
+static char cfg_hex[200];
+static volatile int cfg_retries; /* 0 = idle; >0 = retransmit on next timeout */
 
 /* ─── Thread ──────────────────────────────────────────────────────────────── */
 #define WIFI_STACK_SIZE 2048
@@ -107,6 +117,21 @@ static void parse_wifi_status_line(const char *line)
 		const char *val = rest + 7;
 		while (*val == ' ') val++;
 		ws_ready = (strncmp(val, "ready", 5) == 0);
+	} else if (strncmp(rest, "SSID:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		uint8_t enc[33], plain[33];
+		int n = cfg_from_hex(val, enc, sizeof(enc) - 1);
+		if (n > 0) {
+			cfg_xor(enc, plain, (size_t)n);
+			plain[n] = '\0';
+			memcpy(ws_ssid, plain, (size_t)n + 1);
+		}
+	} else if (strncmp(rest, "IP:", 3) == 0) {
+		const char *val = rest + 3;
+		while (*val == ' ') val++;
+		strncpy(ws_ip, val, sizeof(ws_ip) - 1);
+		ws_ip[sizeof(ws_ip) - 1] = '\0';
 	}
 }
 
@@ -774,6 +799,11 @@ static void dispatch_command(const char *line)
 		cmd_dsp();
 	} else if (strcmp(line, "$HELP") == 0) {
 		cmd_help();
+	} else if (strcmp(line, "$WIFICFG:ACK") == 0) {
+		cfg_retries = 0;
+	} else if (strcmp(line, "$WIFICFG:NAK") == 0) {
+		cfg_retries = 0;
+		wifi_log("WIFICFG: NAK from ESP\n");
 	} else if (strcmp(line, "$LOG:ON") == 0) {
 		log_on = true;
 		wifi_cmd_send("$ACK\n");
@@ -811,6 +841,10 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 		int poll_ret = k_poll(poll_events, 2, K_SECONDS(10));
 		if (poll_ret == -EAGAIN) {
 			wifi_cmd_send("#WIFISTATUS\n");
+			if (cfg_retries > 0) {
+				cfg_retries--;
+				wifi_cmd_printf("$WIFICFG:%s\n", cfg_hex);
+			}
 			continue;
 		}
 
@@ -916,6 +950,22 @@ void wifi_cmd_init(void)
 	LOG_INF("WiFi CMD init (UART1 GP4/GP5 + UART0 GP16/GP17 debug, 115200)");
 }
 
-bool wifi_status_is_ready(void) { return ws_ready; }
-bool wifi_status_is_ap(void)    { return ws_is_ap; }
-int  wifi_status_get_rssi(void) { return ws_rssi; }
+bool        wifi_status_is_ready(void)  { return ws_ready; }
+bool        wifi_status_is_ap(void)     { return ws_is_ap; }
+int         wifi_status_get_rssi(void)  { return ws_rssi; }
+const char *wifi_status_get_ssid(void)  { return ws_ssid; }
+const char *wifi_status_get_ip(void)    { return ws_ip; }
+
+void wifi_cfg_set(const char *ssid, const char *password)
+{
+	char plain[100];
+	int n = snprintf(plain, sizeof(plain), "%s\t%s", ssid, password);
+	if (n <= 0 || n >= (int)sizeof(plain)) {
+		return;
+	}
+	uint8_t enc[100];
+	cfg_xor((const uint8_t *)plain, enc, (size_t)n);
+	cfg_to_hex(enc, (size_t)n, cfg_hex, sizeof(cfg_hex));
+	cfg_retries = CFG_MAX_RETRIES;
+	wifi_cmd_printf("$WIFICFG:%s\n", cfg_hex);
+}
