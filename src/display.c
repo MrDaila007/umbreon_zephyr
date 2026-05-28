@@ -526,6 +526,8 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 				? DISPLAY_REFRESH_MS : DISPLAY_MENU_MS;
 			k_msleep(ms);
 		} else {
+			int ignored_rot;
+			(void)encoder_poll(&ignored_rot);
 			k_msleep(100); /* low-rate poll while car runs */
 		}
 	}
