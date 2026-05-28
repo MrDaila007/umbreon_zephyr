@@ -25,6 +25,11 @@ static struct gpio_callback sw_cb_data;
 #define ENCODER_STACK_SIZE 1024
 #define ENCODER_PRIORITY   5
 #define ENCODER_POLL_MS    1
+#define ENCODER_REVERSE    true
+
+#define ENC_BTN_DEBOUNCE_MS 50
+#define ENC_BTN_CLICK_MS    500
+#define ENC_BTN_HOLD_MS     600
 
 static K_THREAD_STACK_DEFINE(encoder_stack, ENCODER_STACK_SIZE);
 static struct k_thread encoder_thread_data;
@@ -34,7 +39,7 @@ static atomic_t rotation_counter;    /* net rotation steps */
 
 /* Quadrature state: track previous CLK/DT for step4 decoding */
 static volatile uint8_t enc_state;   /* 2-bit: (old_CLK << 1) | old_DT */
-static volatile int8_t enc_accum;    /* accumulate 4 transitions per detent */
+static volatile int8_t enc_accum;    /* EncButton-style epos accumulator */
 static atomic_t transition_counter;
 static atomic_t invalid_counter;
 static atomic_t same_counter;
@@ -48,15 +53,6 @@ static uint32_t last_sw_us;         /* debounce */
 static bool encoder_ready;
 
 /* ─── Rotation polling ───────────────────────────────────────────────────── */
-
-/* Standard quadrature decode lookup: oldstate -> newstate -> direction
- * Only valid transitions produce ±1, invalid ones produce 0 */
-static const int8_t quad_table[16] = {
-	 0, -1,  1,  0,
-	 1,  0,  0, -1,
-	-1,  0,  0,  1,
-	 0,  1, -1,  0,
-};
 
 static uint8_t read_ab_state(void)
 {
@@ -72,28 +68,42 @@ static void process_ab_state(uint8_t new_state)
 		return;
 	}
 
-	/* Lookup direction from state transition */
-	int8_t dir = quad_table[(old_state << 2) | new_state];
-	enc_state = new_state;
-	atomic_inc(&state_counter[new_state & 0x03]);
+	bool p0 = (old_state >> 1) & 1;
+	bool p1 = old_state & 1;
+	bool e0 = (new_state >> 1) & 1;
+	bool e1 = new_state & 1;
 
-	if (dir == 0) {
-		enc_accum = 0;
+	/*
+	 * Port of GyverLibs EncButton VirtEncoder::pollEnc(), configured as
+	 * EB_STEP4_LOW. For pull-up encoders this emits one step at idle 11.
+	 */
+	if (!(p0 ^ p1 ^ e0 ^ e1)) {
 		atomic_inc(&invalid_counter);
 		return;
 	}
 
+	(p1 ^ e0) ? ++enc_accum : --enc_accum;
+	enc_state = new_state;
 	atomic_inc(&transition_counter);
+	atomic_inc(&state_counter[new_state & 0x03]);
 
-	/* One physical click on this module is one full 4-transition cycle. */
-	enc_accum += dir;
-	if (enc_accum >= 4) {
-		atomic_dec(&rotation_counter);
-		enc_accum = 0;
-	} else if (enc_accum <= -4) {
-		atomic_inc(&rotation_counter);
-		enc_accum = 0;
+	if (!enc_accum) {
+		return;
 	}
+
+	/* EB_STEP4_LOW: skip 01, 10, 00; emit only when both lines are high. */
+	if (!(e0 && e1)) {
+		return;
+	}
+
+	int8_t step = ((enc_accum > 0) ^ ENCODER_REVERSE) ? -1 : 1;
+	atomic_add(&rotation_counter, step);
+	if (step > 0) {
+		atomic_inc(&synth_counter);
+	} else {
+		atomic_inc(&same_counter);
+	}
+	enc_accum = 0;
 }
 
 static void encoder_thread(void *p1, void *p2, void *p3)
@@ -121,7 +131,7 @@ static void sw_isr(const struct device *dev, struct gpio_callback *cb,
 
 	uint32_t now = k_cycle_get_32();
 	uint32_t elapsed_us = k_cyc_to_us_floor32(now - last_sw_us);
-	if (elapsed_us < 50000) {  /* 50ms debounce */
+	if (elapsed_us < (ENC_BTN_DEBOUNCE_MS * 1000U)) {
 		return;
 	}
 	last_sw_us = now;
@@ -254,20 +264,20 @@ uint8_t encoder_poll(int *rotation)
 		int64_t since = now - pt;
 		bool pressed = gpio_pin_get_dt(&enc_sw);
 
-		/* Hold: button pressed > 800ms ago and still held */
-		if (since > 800 && pressed) {
+		/* EncButton default hold timeout: 600 ms. */
+		if (since > ENC_BTN_HOLD_MS && pressed) {
 			events |= ENC_EVT_HOLD;
 			atomic_set(&press_time_ms, 0);
 			atomic_set(&prev_press_ms, 0);
 		}
-		/* Double-click: two presses within 400ms */
-		else if (pp > 0 && (pt - pp) < 400 && (pt - pp) > 30) {
+		/* Double-click: two presses within EncButton click window. */
+		else if (pp > 0 && (pt - pp) < ENC_BTN_CLICK_MS && (pt - pp) > 30) {
 			events |= ENC_EVT_DOUBLE;
 			atomic_set(&press_time_ms, 0);
 			atomic_set(&prev_press_ms, 0);
 		}
-		/* Single click: 400ms elapsed since last press, no second press */
-		else if (since > 400 && !pressed) {
+		/* Click is emitted only after release, matching EncButton semantics. */
+		else if (since > ENC_BTN_DEBOUNCE_MS && !pressed) {
 			events |= ENC_EVT_CLICK;
 			atomic_set(&press_time_ms, 0);
 			atomic_set(&prev_press_ms, 0);
