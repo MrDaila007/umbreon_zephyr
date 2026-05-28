@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "../wifi_cmd.h"
 
 /* ─── Layout constants ───────────────────────────────────────────────────── */
 #define STATUS_Y       0
@@ -28,7 +29,7 @@
 #define IMU_Y         36
 #define IMU_SCALE_Y   40   /* tick line y */
 #define IMU_MARKER_Y  41   /* marker top */
-#define IMU_VALUE_Y   52   /* numeric value y */
+#define IMU_VALUE_Y   53   /* numeric value baseline (5×7 font) */
 
 #define BAR_W          8   /* each sensor bar width */
 #define BAR_GAP        4   /* gap between bars */
@@ -134,29 +135,70 @@ static void draw_imu_scale(void)
 	/* Baseline */
 	u8g2_DrawHLine(&u8g2, 0, IMU_SCALE_Y, SCR_W);
 
-	/* Tick marks at -90, -45, 0, +45, +90 */
-	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+	/* Tick marks at -90, -45, 0, +45, +90 (no text labels — space for WiFi strip) */
 	const int ticks[] = {-90, -45, 0, 45, 90};
-	const char *tick_lbl[] = {"-90", "-45", "0", "45", "90"};
-
 	for (int i = 0; i < 5; i++) {
 		int tx = CENTER_X + (int)(ticks[i] * IMU_HALF_W / 90);
 		u8g2_DrawVLine(&u8g2, tx, IMU_SCALE_Y - 3, 6);
-		/* Center label under tick */
-		int lw = u8g2_GetStrWidth(&u8g2, tick_lbl[i]);
-		u8g2_DrawStr(&u8g2, tx - lw / 2, IMU_SCALE_Y + 10, tick_lbl[i]);
 	}
 
 	/* Sliding marker */
 	int mx = CENTER_X + (int)(yaw * IMU_HALF_W / 90.0f);
 	u8g2_DrawBox(&u8g2, mx - 2, IMU_MARKER_Y, 5, 5);
 
-	/* Numeric value */
+	/* Numeric value — 5×7 font, baseline IMU_VALUE_Y */
 	char buf[12];
 	snprintf(buf, sizeof(buf), "%.1f", (double)yaw);
-	u8g2_SetFont(&u8g2, u8g2_font_9x15_tr);
+	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 	int vw = u8g2_GetStrWidth(&u8g2, buf);
-	u8g2_DrawStr(&u8g2, (SCR_W - vw) / 2, IMU_VALUE_Y + 10, buf);
+	u8g2_DrawStr(&u8g2, (SCR_W - vw) / 2, IMU_VALUE_Y, buf);
+}
+
+/* ─── WiFi status strip ──────────────────────────────────────────────────── */
+static int rssi_to_bars(int rssi)
+{
+	if (rssi >= -60) return 4;
+	if (rssi >= -70) return 3;
+	if (rssi >= -80) return 2;
+	if (rssi >= -90) return 1;
+	return 0;
+}
+
+static void draw_wifi_strip(void)
+{
+	if (!wifi_status_is_ready()) {
+		return;
+	}
+
+	u8g2_DrawHLine(&u8g2, 0, 56, SCR_W);
+
+	bool is_ap = wifi_status_is_ap();
+	int  rssi  = wifi_status_get_rssi();
+	int  bars  = is_ap ? 4 : rssi_to_bars(rssi);
+
+	/* 4 signal bars, increasing height (2/3/5/7 px), anchored at y=63 */
+	static const uint8_t bar_h[] = {2, 3, 5, 7};
+	static const uint8_t bar_x[] = {2, 5, 8, 11};
+
+	for (int i = 0; i < 4; i++) {
+		int bh = bar_h[i];
+		int bx = bar_x[i];
+		int by = 64 - bh;
+		if (i < bars) {
+			u8g2_DrawBox(&u8g2, bx, by, 2, bh);
+		} else {
+			u8g2_DrawPixel(&u8g2, bx, by);
+		}
+	}
+
+	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+	char buf[16];
+	if (is_ap) {
+		snprintf(buf, sizeof(buf), "AP");
+	} else {
+		snprintf(buf, sizeof(buf), "STA %d", rssi);
+	}
+	u8g2_DrawStr(&u8g2, 16, 63, buf);
 }
 
 /* ─── Public entry point ─────────────────────────────────────────────────── */
@@ -167,6 +209,7 @@ void screen_dashboard_draw(void)
 	draw_sensor_bars();
 	u8g2_DrawHLine(&u8g2, 0, IMU_Y - 2, SCR_W);
 	draw_imu_scale();
+	draw_wifi_strip();
 
 	u8g2_SendBuffer(&u8g2);
 }
