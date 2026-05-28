@@ -39,7 +39,7 @@ setup:
 check-ui:
 	$(PYTHON_BIN) tools/sim_dashboard.py
 
-build: check-ui
+build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
 	west build -b $(BOARD) $(SRC_DIR) --pristine always

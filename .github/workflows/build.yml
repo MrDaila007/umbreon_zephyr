@@ -22,6 +22,25 @@ jobs:
         working-directory: tests
         run: make test-host
 
+  # ── UI overlap check (PIL simulator, no Zephyr required) ─────────────────
+  check-ui:
+    runs-on: [self-hosted, linux, embedded]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pillow
+        run: pip install --quiet pillow
+
+      - name: Check dashboard UI overlaps
+        run: python3 tools/sim_dashboard.py
+
+      - name: Upload simulator render
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-dashboard
+          path: tools/sim_dashboard.png
+
   # ── Firmware build (RP2350) — предустановленный Zephyr workspace на runner ─
   build:
     runs-on: [self-hosted, linux, embedded]
