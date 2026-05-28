@@ -56,7 +56,7 @@ void screen_info_draw(const struct ui_state *st)
 
 	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 	for (int i = 0; i < INFO_VISIBLE && (scroll + i) < count; i++) {
-		u8g2_DrawStr(&u8g2, 3, 16 + i * 9, lines[scroll + i]);
+		u8g2_DrawStr(&u8g2, 3, 22 + i * 9, lines[scroll + i]);
 	}
 
 	/* Scroll bar */
