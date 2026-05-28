@@ -741,6 +741,125 @@ TEST(test_stuck_sensor_confirmed_still_works)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: parse_wifi_status_line (copy from wifi_cmd.c)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static volatile bool test_ws_ready;
+static volatile bool test_ws_is_ap;
+static volatile int  test_ws_rssi;
+
+static void test_parse_wifi_status_line(const char *line)
+{
+	const char *rest = line + 2;
+	if (strncmp(rest, "Mode:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		test_ws_is_ap = (strncmp(val, "AP", 2) == 0);
+	} else if (strncmp(rest, "RSSI:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		test_ws_rssi = atoi(val);
+	} else if (strncmp(rest, "Status:", 7) == 0) {
+		const char *val = rest + 7;
+		while (*val == ' ') val++;
+		test_ws_ready = (strncmp(val, "ready", 5) == 0);
+	}
+}
+
+/* From screen_dashboard.c — copy of rssi_to_bars */
+static int test_rssi_to_bars(int rssi)
+{
+	if (rssi >= -60) return 4;
+	if (rssi >= -70) return 3;
+	if (rssi >= -80) return 2;
+	if (rssi >= -90) return 1;
+	return 0;
+}
+
+TEST(test_wifi_parse_mode_sta)
+{
+	test_ws_is_ap = true;
+	test_parse_wifi_status_line("# Mode:  STA");
+	ASSERT_FALSE(test_ws_is_ap);
+}
+
+TEST(test_wifi_parse_mode_ap)
+{
+	test_ws_is_ap = false;
+	test_parse_wifi_status_line("# Mode:  AP");
+	ASSERT_TRUE(test_ws_is_ap);
+}
+
+TEST(test_wifi_parse_rssi_negative)
+{
+	test_ws_rssi = 0;
+	test_parse_wifi_status_line("# RSSI:  -65");
+	ASSERT_EQ(test_ws_rssi, -65);
+}
+
+TEST(test_wifi_parse_rssi_strong)
+{
+	test_ws_rssi = 0;
+	test_parse_wifi_status_line("# RSSI:  -42");
+	ASSERT_EQ(test_ws_rssi, -42);
+}
+
+TEST(test_wifi_parse_status_ready)
+{
+	test_ws_ready = false;
+	test_parse_wifi_status_line("# Status: ready");
+	ASSERT_TRUE(test_ws_ready);
+}
+
+TEST(test_wifi_parse_status_other)
+{
+	test_ws_ready = true;
+	test_parse_wifi_status_line("# Status: other");
+	ASSERT_FALSE(test_ws_ready);
+}
+
+TEST(test_wifi_parse_unknown_key_ignored)
+{
+	test_ws_ready = false;
+	test_ws_rssi  = -55;
+	test_ws_is_ap = true;
+	test_parse_wifi_status_line("# SSID:  umbreon");
+	ASSERT_FALSE(test_ws_ready);
+	ASSERT_EQ(test_ws_rssi, -55);
+	ASSERT_TRUE(test_ws_is_ap);
+}
+
+TEST(test_rssi_bars_excellent)
+{
+	ASSERT_EQ(test_rssi_to_bars(-55), 4);
+	ASSERT_EQ(test_rssi_to_bars(-60), 4);
+}
+
+TEST(test_rssi_bars_good)
+{
+	ASSERT_EQ(test_rssi_to_bars(-61), 3);
+	ASSERT_EQ(test_rssi_to_bars(-70), 3);
+}
+
+TEST(test_rssi_bars_fair)
+{
+	ASSERT_EQ(test_rssi_to_bars(-71), 2);
+	ASSERT_EQ(test_rssi_to_bars(-80), 2);
+}
+
+TEST(test_rssi_bars_poor)
+{
+	ASSERT_EQ(test_rssi_to_bars(-81), 1);
+	ASSERT_EQ(test_rssi_to_bars(-90), 1);
+}
+
+TEST(test_rssi_bars_none)
+{
+	ASSERT_EQ(test_rssi_to_bars(-91), 0);
+	ASSERT_EQ(test_rssi_to_bars(-100), 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Main
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -824,6 +943,22 @@ int main(void)
 	RUN_TEST(test_stall_disabled_when_zero);
 	RUN_TEST(test_stall_resets_on_speed_recovery);
 	RUN_TEST(test_stuck_sensor_confirmed_still_works);
+
+	printf("\n[parse_wifi_status_line]\n");
+	RUN_TEST(test_wifi_parse_mode_sta);
+	RUN_TEST(test_wifi_parse_mode_ap);
+	RUN_TEST(test_wifi_parse_rssi_negative);
+	RUN_TEST(test_wifi_parse_rssi_strong);
+	RUN_TEST(test_wifi_parse_status_ready);
+	RUN_TEST(test_wifi_parse_status_other);
+	RUN_TEST(test_wifi_parse_unknown_key_ignored);
+
+	printf("\n[rssi_to_bars]\n");
+	RUN_TEST(test_rssi_bars_excellent);
+	RUN_TEST(test_rssi_bars_good);
+	RUN_TEST(test_rssi_bars_fair);
+	RUN_TEST(test_rssi_bars_poor);
+	RUN_TEST(test_rssi_bars_none);
 
 	TEST_SUMMARY();
 }
