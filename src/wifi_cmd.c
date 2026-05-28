@@ -24,6 +24,8 @@
 #include "tests.h"
 #include "track_learn.h"
 #include "display.h"
+#include "display_hal.h"
+#include "encoder.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -592,7 +594,33 @@ static void cmd_sys(void)
 			(double)battery_get_voltage(),
 			c.min_point, c.max_point, c.neutral_point,
 			c.loop_ms,
-			sensors_online_count());
+		sensors_online_count());
+}
+
+static void cmd_enc(void)
+{
+	int clk = 0;
+	int dt = 0;
+	int sw = 0;
+	int rot = 0;
+	int trans = 0;
+	int invalid = 0;
+	int same = 0;
+	int synth = 0;
+	int accum = 0;
+	int states[4] = {0};
+	bool ok = encoder_get_debug(&clk, &dt, &sw, &rot,
+				     &trans, &invalid, &same, &synth, &accum, states);
+	wifi_cmd_printf("$ENC:ok=%d,CLK=%d,DT=%d,SW=%d,ROT=%d,TR=%d,INV=%d,SAME=%d,SYN=%d,ACC=%d,S=%d/%d/%d/%d\n",
+		ok ? 1 : 0, clk, dt, sw, rot, trans, invalid, same, synth, accum,
+		states[0], states[1], states[2], states[3]);
+}
+
+static void cmd_dsp(void)
+{
+	wifi_cmd_printf("$DSP:present=%d,errors=%u\n",
+		display_hal_is_present() ? 1 : 0,
+		(unsigned int)display_hal_error_count());
 }
 
 static void cmd_help(void)
@@ -606,7 +634,7 @@ static void cmd_help(void)
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
 		"$L: $TRK:<cmd> (START,STOP,RACE,STATUS,CLEAR)\n"
 		"$L: --- Debug ---\n"
-		"$L: $DIAG $SNS $IMU $PID $SYS $HELP\n"
+		"$L: $DIAG $SNS $IMU $PID $SYS $ENC $DSP $HELP\n"
 		"$L: $LOG:ON $LOG:OFF (toggle debug log forwarding)\n"
 	);
 }
@@ -716,6 +744,10 @@ static void dispatch_command(const char *line)
 		cmd_pid();
 	} else if (strcmp(line, "$SYS") == 0) {
 		cmd_sys();
+	} else if (strcmp(line, "$ENC") == 0) {
+		cmd_enc();
+	} else if (strcmp(line, "$DSP") == 0) {
+		cmd_dsp();
 	} else if (strcmp(line, "$HELP") == 0) {
 		cmd_help();
 	} else if (strcmp(line, "$LOG:ON") == 0) {

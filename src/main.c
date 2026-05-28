@@ -151,7 +151,7 @@ int main(void)
 	wifi_cmd_init();
 	track_learn_init();
 	encoder_init();
-	/* display_init(); */
+	display_init();
 
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */

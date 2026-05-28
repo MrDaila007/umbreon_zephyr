@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <zephyr/kernel.h>
 #include <u8g2.h>
 
@@ -10,6 +13,9 @@ extern u8g2_t u8g2;
  * Must be called from the display thread after the I2C bus is ready.
  * Returns 0 on success, negative errno on failure. */
 int display_hal_init(void);
+
+bool display_hal_is_present(void);
+uint32_t display_hal_error_count(void);
 
 /* HAL callbacks — exposed for unit testing only. */
 uint8_t u8x8_byte_zephyr_hw_i2c(u8x8_t *u8x8, uint8_t msg,

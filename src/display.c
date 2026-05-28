@@ -188,18 +188,38 @@ static void clamp_scroll(int *s, int *sc, int total, int visible)
 
 /* ─── Navigation helpers ─────────────────────────────────────────────────── */
 
+static const char *screen_name(enum screen scr)
+{
+	switch (scr) {
+	case SCR_DASHBOARD:       return "dashboard";
+	case SCR_MAIN_MENU:       return "menu";
+	case SCR_SETTINGS_GROUPS: return "settings_groups";
+	case SCR_SETTINGS_LIST:   return "settings_list";
+	case SCR_SETTINGS_EDIT:   return "settings_edit";
+	case SCR_TESTS:           return "tests";
+	case SCR_TEST_RUNNING:    return "test_running";
+	case SCR_ACTIONS:         return "actions";
+	case SCR_CONFIRM:         return "confirm";
+	case SCR_INFO:            return "info";
+	default:                  return "unknown";
+	}
+}
+
 static void go_screen(enum screen scr)
 {
+	enum screen prev = st.cur_scr;
 	st.prev_scr = st.cur_scr;
 	st.cur_scr  = scr;
 	st.sel = (scr == SCR_MAIN_MENU || scr == SCR_SETTINGS_GROUPS ||
 		  scr == SCR_SETTINGS_LIST || scr == SCR_TESTS ||
 		  scr == SCR_ACTIONS) ? 1 : 0;
 	st.scroll = 0;
+	wifi_log("DSP:screen %s->%s", screen_name(prev), screen_name(scr));
 }
 
 static void go_back(void)
 {
+	enum screen prev = st.cur_scr;
 	switch (st.cur_scr) {
 	case SCR_MAIN_MENU:       st.cur_scr = SCR_DASHBOARD;       break;
 	case SCR_SETTINGS_GROUPS: st.cur_scr = SCR_MAIN_MENU;       break;
@@ -214,6 +234,7 @@ static void go_back(void)
 	}
 	st.sel = 1;
 	st.scroll = 0;
+	wifi_log("DSP:back %s->%s", screen_name(prev), screen_name(st.cur_scr));
 }
 
 /* ─── Command dispatch ───────────────────────────────────────────────────── */
@@ -253,8 +274,13 @@ static void handle_input(void)
 	bool fast  = events & ENC_EVT_FAST;
 	int dir = rot;
 
+	if (events || rot != 0) {
+		wifi_log("ENC:rot=%d,ev=%02x,screen=%s,sel=%d",
+			 rot, events, screen_name(st.cur_scr), st.sel);
+	}
 
 	if (held) {
+		enum screen prev = st.cur_scr;
 		if (st.cur_scr == SCR_SETTINGS_EDIT) {
 			st.cur_scr = SCR_SETTINGS_LIST;
 		} else {
@@ -262,6 +288,7 @@ static void handle_input(void)
 		}
 		st.sel = 0;
 		st.scroll = 0;
+		wifi_log("DSP:hold %s->%s", screen_name(prev), screen_name(st.cur_scr));
 		return;
 	}
 
@@ -438,39 +465,48 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 
 	k_msleep(500); /* let drivers settle */
 
-	if (display_hal_init() != 0) {
-		LOG_ERR("display HAL init failed — thread exiting");
-		return;
+	bool display_ok = (display_hal_init() == 0);
+	if (!display_ok) {
+		LOG_ERR("display HAL init failed — encoder polling only");
 	}
 
-	u8g2_SetPowerSave(&u8g2, 0); /* display always on at boot */
+	if (display_ok) {
+		u8g2_SetPowerSave(&u8g2, 0); /* display always on at boot */
+	}
 	st.cur_scr = SCR_DASHBOARD;
-	bool disp_on = true;
+	bool disp_on = display_ok;
 
-	LOG_INF("Display ready");
+	LOG_INF("Display thread ready display=%d", display_ok ? 1 : 0);
+	wifi_log("DSP:ready,display=%d", display_ok ? 1 : 0);
 
 	while (1) {
 		bool running = car_is_running || test_is_active;
+		display_ok = display_hal_is_present();
 
-		if (running && disp_on) {
+		if (running && disp_on && display_ok) {
 			/* Car started — blank and sleep display */
 			u8g2_ClearBuffer(&u8g2);
 			u8g2_SendBuffer(&u8g2);
 			u8g2_SetPowerSave(&u8g2, 1);
 			disp_on = false;
-		} else if (!running && !disp_on) {
+			wifi_log("DSP:sleep running=%d,test=%d",
+				 car_is_running ? 1 : 0, test_is_active ? 1 : 0);
+		} else if (!running && !disp_on && display_ok) {
 			/* Car stopped — wake display, back to dashboard */
 			u8g2_SetPowerSave(&u8g2, 0);
 			st.cur_scr = SCR_DASHBOARD;
 			st.sel     = 0;
 			st.scroll  = 0;
 			disp_on = true;
+			wifi_log("DSP:wake");
 		}
 
 		if (!running) {
 			handle_input();
-			u8g2_ClearBuffer(&u8g2);
-			draw_current_screen(); /* calls u8g2_SendBuffer() */
+			if (display_ok) {
+				u8g2_ClearBuffer(&u8g2);
+				draw_current_screen(); /* calls u8g2_SendBuffer() */
+			}
 
 			int ms = (st.cur_scr == SCR_DASHBOARD)
 				? DISPLAY_REFRESH_MS : DISPLAY_MENU_MS;

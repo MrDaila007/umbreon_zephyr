@@ -45,15 +45,15 @@
 	encoder {
 		compatible = "gpio-keys";
 		enc_a: enc_clk {
-			gpios = <&gpio0 22 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 22 0>;
 			label = "Encoder CLK";
 		};
 		enc_b: enc_dt {
-			gpios = <&gpio0 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 12 0>;
 			label = "Encoder DT";
 		};
 		enc_sw: enc_btn {
-			gpios = <&gpio0 19 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 19 GPIO_ACTIVE_LOW>;
 			label = "Encoder Button";
 		};
 	};

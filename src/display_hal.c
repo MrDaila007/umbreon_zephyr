@@ -38,6 +38,17 @@ static const struct device *i2c_dev;
 static uint8_t  i2c_buf[I2C_BUF_SIZE];
 static int      i2c_buf_len;
 static bool     transfer_active;
+static bool     display_present;
+static uint32_t display_i2c_errors;
+
+#define DISPLAY_I2C_ADDR       0x3c
+#define DISPLAY_MAX_I2C_ERRORS 3
+
+static int display_probe(void)
+{
+	uint8_t control = 0x00;
+	return i2c_write(i2c_dev, &control, sizeof(control), DISPLAY_I2C_ADDR);
+}
 
 /* ─── u8x8_byte_zephyr_hw_i2c ───────────────────────────────────────────── */
 
@@ -93,6 +104,12 @@ uint8_t u8x8_byte_zephyr_hw_i2c(u8x8_t *u8x8, uint8_t msg,
 			return 0;
 		}
 		if (i2c_buf_len > 0) {
+			if (!display_present) {
+				i2c_buf_len = 0;
+				transfer_active = false;
+				k_mutex_unlock(&i2c0_mutex);
+				return 0;
+			}
 			/*
 			 * u8x8 stores the 8-bit write address (7-bit addr << 1).
 			 * SSD1306 default: u8x8->i2c_address = 0x78 → 7-bit = 0x3C.
@@ -102,8 +119,14 @@ uint8_t u8x8_byte_zephyr_hw_i2c(u8x8_t *u8x8, uint8_t msg,
 			int rc = i2c_write(i2c_dev, i2c_buf,
 					   (uint32_t)i2c_buf_len, addr);
 			if (rc != 0) {
+				display_i2c_errors++;
 				LOG_ERR("i2c_write addr=0x%02x len=%d rc=%d",
 					addr, i2c_buf_len, rc);
+				if (display_i2c_errors >= DISPLAY_MAX_I2C_ERRORS) {
+					display_present = false;
+					LOG_ERR("SSD1306 disabled after %u I2C errors",
+						display_i2c_errors);
+				}
 			}
 			i2c_buf_len = 0;
 		}
@@ -164,6 +187,17 @@ int display_hal_init(void)
 		return -ENODEV;
 	}
 
+	display_i2c_errors = 0;
+	display_present = false;
+	int rc = display_probe();
+	if (rc != 0) {
+		display_i2c_errors++;
+		LOG_ERR("SSD1306 not detected at I2C0 addr=0x%02x rc=%d",
+			DISPLAY_I2C_ADDR, rc);
+		return -ENODEV;
+	}
+	display_present = true;
+
 	/*
 	 * Full-buffer mode (_f suffix): u8g2 allocates a 1024-byte framebuffer
 	 * inside u8g2_t. All drawing goes to RAM first; u8g2_SendBuffer() does
@@ -184,4 +218,14 @@ int display_hal_init(void)
 
 	LOG_INF("u8g2 HAL init OK (SSD1306 128x64, I2C0 addr=0x3C)");
 	return 0;
+}
+
+bool display_hal_is_present(void)
+{
+	return display_present;
+}
+
+uint32_t display_hal_error_count(void)
+{
+	return display_i2c_errors;
 }

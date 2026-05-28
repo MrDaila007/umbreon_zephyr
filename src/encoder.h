@@ -14,6 +14,10 @@
 
 void encoder_init(void);
 
+bool encoder_get_debug(int *clk, int *dt, int *sw, int *pending_rotation,
+		       int *transition_count, int *invalid_count, int *same_count,
+		       int *synth_count, int *accum, int state_counts[4]);
+
 /* Poll accumulated encoder events (call from display thread tick).
  * Returns event bitmask, *rotation = net steps (+ = CW, - = CCW). */
 uint8_t encoder_poll(int *rotation);
