@@ -79,8 +79,9 @@ static volatile bool log_on;
 static volatile bool ws_ready;
 static volatile bool ws_is_ap;
 static volatile int  ws_rssi;
-static char          ws_ssid[33]; /* decrypted SSID from last #WIFISTATUS */
-static char          ws_ip[16];   /* IP address from last #WIFISTATUS */
+static char          ws_ssid[33];   /* decrypted SSID from last #WIFISTATUS */
+static char          ws_ip[16];     /* IP address from last #WIFISTATUS */
+static char          ws_ap_pass[64]; /* decrypted AP password (AP mode only) */
 
 /* ─── $WIFICFG pending state ──────────────────────────────────────────────── */
 #define CFG_MAX_RETRIES 5
@@ -109,6 +110,19 @@ static void parse_wifi_status_line(const char *line)
 		const char *val = rest + 5;
 		while (*val == ' ') val++;
 		ws_is_ap = (strncmp(val, "AP", 2) == 0);
+		if (!ws_is_ap) {
+			ws_ap_pass[0] = '\0';
+		}
+	} else if (strncmp(rest, "AP Pass:", 8) == 0) {
+		const char *val = rest + 8;
+		while (*val == ' ') val++;
+		uint8_t enc[63], plain[63];
+		int n = cfg_from_hex(val, enc, sizeof(enc));
+		if (n > 0) {
+			cfg_xor(enc, plain, (size_t)n);
+			plain[n] = '\0';
+			memcpy(ws_ap_pass, plain, (size_t)n + 1);
+		}
 	} else if (strncmp(rest, "RSSI:", 5) == 0) {
 		const char *val = rest + 5;
 		while (*val == ' ') val++;
@@ -953,8 +967,9 @@ void wifi_cmd_init(void)
 bool        wifi_status_is_ready(void)  { return ws_ready; }
 bool        wifi_status_is_ap(void)     { return ws_is_ap; }
 int         wifi_status_get_rssi(void)  { return ws_rssi; }
-const char *wifi_status_get_ssid(void)  { return ws_ssid; }
-const char *wifi_status_get_ip(void)    { return ws_ip; }
+const char *wifi_status_get_ssid(void)    { return ws_ssid; }
+const char *wifi_status_get_ip(void)      { return ws_ip; }
+const char *wifi_status_get_ap_pass(void) { return ws_ap_pass; }
 
 void wifi_cfg_set(const char *ssid, const char *password)
 {

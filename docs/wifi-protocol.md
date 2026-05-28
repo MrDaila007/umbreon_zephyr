@@ -236,7 +236,8 @@ intercepts it and replies with a multi-line block:
 # Status: ready
 ```
 
-In AP mode the `# RSSI:` line is omitted and IP is the AP gateway address
+In AP mode the `# RSSI:` line is omitted, `# AP Pass:` carries the XOR+hex
+encrypted AP password (same cipher as SSID), and IP is the AP gateway address
 (`192.168.4.1` by default).
 
 The `# SSID:` value is XOR-encrypted with the shared PSK and hex-encoded (see
@@ -252,6 +253,7 @@ Pico getters updated on every poll:
 | `wifi_status_get_rssi()` | RSSI dBm (0 in AP mode) |
 | `wifi_status_get_ssid()` | Decrypted SSID string |
 | `wifi_status_get_ip()` | IP address string |
+| `wifi_status_get_ap_pass()` | Decrypted AP password (AP mode only) |
 
 ### Credential Provisioning
 

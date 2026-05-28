@@ -230,6 +230,9 @@ static void go_screen(enum screen scr)
 		  scr == SCR_SETTINGS_LIST || scr == SCR_TESTS ||
 		  scr == SCR_ACTIONS) ? 1 : 0;
 	st.scroll = 0;
+	if (scr == SCR_WIFI) {
+		st.wifi_scroll = 0;
+	}
 	wifi_log("DSP:screen %s->%s", screen_name(prev), screen_name(scr));
 }
 
@@ -452,8 +455,19 @@ static void handle_input(void)
 		break;
 
 	case SCR_WIFI:
-		if (dir != 0) st.wifi_scroll += dir;
-		if (click) { st.wifi_scroll = 0; go_back(); }
+		if (dir != 0) {
+			st.wifi_scroll += dir;
+			if (st.wifi_scroll < 0) {
+				st.wifi_scroll = 0;
+			}
+			if (st.wifi_scroll > 2) {
+				st.wifi_scroll = 2;
+			}
+		}
+		if (click) {
+			st.wifi_scroll = 0;
+			go_back();
+		}
 		break;
 	}
 }

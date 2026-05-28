@@ -24,8 +24,9 @@ bool wifi_log_enabled(void);
 bool        wifi_status_is_ready(void);
 bool        wifi_status_is_ap(void);
 int         wifi_status_get_rssi(void);
-const char *wifi_status_get_ssid(void); /* decrypted SSID, empty until first poll */
-const char *wifi_status_get_ip(void);   /* IP address string, empty until first poll */
+const char *wifi_status_get_ssid(void);    /* decrypted SSID, empty until first poll */
+const char *wifi_status_get_ip(void);      /* IP address string, empty until first poll */
+const char *wifi_status_get_ap_pass(void); /* decrypted AP password, AP mode only */
 
 /* Send encrypted WiFi credentials to ESP (ssid\tpassword XOR+hex).
  * Retransmits every 10 s (up to CFG_MAX_RETRIES=5) until $WIFICFG:ACK.
