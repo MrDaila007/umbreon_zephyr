@@ -138,7 +138,7 @@ static bool draw_qr_payload(const char *payload)
 static void draw_status_page(void)
 {
 	char line[22];
-	int y = 15;
+	int y = 20;
 
 	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 
