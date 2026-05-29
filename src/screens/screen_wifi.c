@@ -19,22 +19,30 @@
 
 #define WIFI_PAGE_COUNT  3
 #define QR_MAX_VERSION   10
-#define QR_AREA_Y        16
-#define QR_AREA_H        48
-#define QR_AREA_W        SCR_W
+#define QR_SIZE          64   /* right-half 64×64 QR area */
+#define QR_LEFT_W        (SCR_W - QR_SIZE)  /* left label column width */
 
 static uint8_t qr_temp[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)];
 static uint8_t qr_code[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)];
 
+static const char *page_title(int page)
+{
+	switch (page) {
+	case 0:  return "WiFi Status";
+	case 1:  return "Join WiFi";
+	default: return "Web UI";
+	}
+}
+
 static void draw_title(int page)
 {
-	char title[16];
+	const char *title = page_title(page);
 
-	snprintf(title, sizeof(title), "WiFi %d/%d", page + 1, WIFI_PAGE_COUNT);
-	u8g2_SetFont(&u8g2, u8g2_font_9x15_tr);
-	u8g2_DrawBox(&u8g2, 0, 0, SCR_W, 14);
+	u8g2_SetFont(&u8g2, u8g2_font_6x10_tr);
+	u8g2_DrawBox(&u8g2, 0, 0, SCR_W, 13);
 	u8g2_SetDrawColor(&u8g2, 0);
-	u8g2_DrawStr(&u8g2, 28, 11, title);
+	int tw = u8g2_GetStrWidth(&u8g2, title);
+	u8g2_DrawStr(&u8g2, (SCR_W - tw) / 2, 10, title);
 	u8g2_SetDrawColor(&u8g2, 1);
 }
 
@@ -103,28 +111,27 @@ static bool build_web_url(char *buf, size_t sz)
 	return true;
 }
 
-static void draw_qr_payload(const char *payload)
+/* Draw QR code centred in the right QR_SIZE×QR_SIZE column.
+ * Returns false if encoding failed. */
+static bool draw_qr_payload(const char *payload)
 {
 	if (!qrcodegen_encodeText(payload, qr_temp, qr_code,
 				  qrcodegen_Ecc_LOW,
 				  qrcodegen_VERSION_MIN, QR_MAX_VERSION,
 				  qrcodegen_Mask_AUTO, true)) {
-		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
-		u8g2_DrawStr(&u8g2, 8, 36, "QR encode fail");
-		return;
+		return false;
 	}
 
 	int modules = qrcodegen_getSize(qr_code);
-	int max_px = QR_AREA_H < QR_AREA_W ? QR_AREA_H : QR_AREA_W;
-	int scale = max_px / (modules + 2);
+	int scale   = QR_SIZE / modules;
 
 	if (scale < 1) {
 		scale = 1;
 	}
 
 	int qr_px = modules * scale;
-	int x0 = (SCR_W - qr_px) / 2;
-	int y0 = QR_AREA_Y + (QR_AREA_H - qr_px) / 2;
+	int x0 = QR_LEFT_W + (QR_SIZE - qr_px) / 2;
+	int y0 = (SCR_H - qr_px) / 2;
 
 	for (int y = 0; y < modules; y++) {
 		for (int x = 0; x < modules; x++) {
@@ -136,12 +143,13 @@ static void draw_qr_payload(const char *payload)
 			}
 		}
 	}
+	return true;
 }
 
 static void draw_status_page(void)
 {
 	char line[22];
-	int y = 22;
+	int y = 15;
 
 	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 
@@ -201,38 +209,59 @@ static void draw_status_page(void)
 	u8g2_DrawStr(&u8g2, 3, y, line);
 }
 
+/* Left label column for QR pages (fits ~10 chars wide at 5x7). */
+static void draw_qr_label(const char *line1, const char *line2)
+{
+	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+	if (line1) {
+		u8g2_DrawStr(&u8g2, 1, 20, line1);
+	}
+	if (line2) {
+		u8g2_DrawStr(&u8g2, 1, 30, line2);
+	}
+}
+
 static void draw_wifi_qr_page(void)
 {
 	char payload[160];
 
-	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
-	u8g2_DrawStr(&u8g2, 3, 22, "Scan to join WiFi");
+	draw_qr_label("Scan to", "join WiFi");
 
 	if (!build_wifi_payload(payload, sizeof(payload))) {
-		u8g2_DrawStr(&u8g2, 8, 36, "Waiting for AP...");
+		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+		u8g2_DrawStr(&u8g2, 1, 44, "No AP");
 		return;
 	}
 
-	draw_qr_payload(payload);
+	if (!draw_qr_payload(payload)) {
+		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+		u8g2_DrawStr(&u8g2, 1, 44, "QR fail");
+	}
 }
 
 static void draw_web_qr_page(void)
 {
 	char url[32];
 
-	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
-	u8g2_DrawStr(&u8g2, 3, 22, "Scan for web UI");
+	draw_qr_label("Scan for", "web UI");
 
 	if (!build_web_url(url, sizeof(url))) {
-		u8g2_DrawStr(&u8g2, 8, 36, "Waiting for IP...");
+		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+		u8g2_DrawStr(&u8g2, 1, 44, "No IP");
 		return;
 	}
 
-	draw_qr_payload(url);
+	if (!draw_qr_payload(url)) {
+		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+		u8g2_DrawStr(&u8g2, 1, 44, "QR fail");
+		return;
+	}
 
-	/* Show URL under QR if space allows */
-	if (strlen(url) <= 20) {
-		u8g2_DrawStr(&u8g2, 3, SCR_H - 10, url);
+	/* Show IP under label if short enough */
+	const char *ip = wifi_status_get_ip();
+	if (ip[0]) {
+		u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
+		u8g2_DrawStr(&u8g2, 1, 56, ip);
 	}
 }
 
@@ -247,18 +276,14 @@ void screen_wifi_draw(const struct ui_state *st)
 		page = WIFI_PAGE_COUNT - 1;
 	}
 
-	draw_title(page);
-
-	switch (page) {
-	case 0:
+	/* Status page has a title bar; QR pages use full 128×64 for QR+label */
+	if (page == 0) {
+		draw_title(page);
 		draw_status_page();
-		break;
-	case 1:
+	} else if (page == 1) {
 		draw_wifi_qr_page();
-		break;
-	default:
+	} else {
 		draw_web_qr_page();
-		break;
 	}
 
 	draw_page_dots(page);
