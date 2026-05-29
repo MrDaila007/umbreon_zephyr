@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "wifi_cipher.h"
 #include <stdarg.h>
 
 LOG_MODULE_REGISTER(wifi_cmd, LOG_LEVEL_INF);
@@ -77,6 +78,9 @@ static volatile bool log_on;
 static volatile bool ws_ready;
 static volatile bool ws_is_ap;
 static volatile int  ws_rssi;
+static char ws_ssid[64];
+static char ws_ip[20];
+static char ws_ap_pass[64];
 
 /* ─── Thread ──────────────────────────────────────────────────────────────── */
 #define WIFI_STACK_SIZE 2048
@@ -107,6 +111,29 @@ static void parse_wifi_status_line(const char *line)
 		const char *val = rest + 7;
 		while (*val == ' ') val++;
 		ws_ready = (strncmp(val, "ready", 5) == 0);
+	} else if (strncmp(rest, "SSID:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		uint8_t raw[32];
+		int n = cfg_from_hex(val, raw, sizeof(raw));
+		if (n > 0) {
+			cfg_xor(raw, (uint8_t *)ws_ssid, n);
+			ws_ssid[n] = '\0';
+		}
+	} else if (strncmp(rest, "IP:", 3) == 0) {
+		const char *val = rest + 3;
+		while (*val == ' ') val++;
+		strncpy(ws_ip, val, sizeof(ws_ip) - 1);
+		ws_ip[sizeof(ws_ip) - 1] = '\0';
+	} else if (strncmp(rest, "AP Pass:", 8) == 0) {
+		const char *val = rest + 8;
+		while (*val == ' ') val++;
+		uint8_t raw[63];
+		int n = cfg_from_hex(val, raw, sizeof(raw));
+		if (n > 0) {
+			cfg_xor(raw, (uint8_t *)ws_ap_pass, n);
+			ws_ap_pass[n] = '\0';
+		}
 	}
 }
 
@@ -916,6 +943,9 @@ void wifi_cmd_init(void)
 	LOG_INF("WiFi CMD init (UART1 GP4/GP5 + UART0 GP16/GP17 debug, 115200)");
 }
 
-bool wifi_status_is_ready(void) { return ws_ready; }
-bool wifi_status_is_ap(void)    { return ws_is_ap; }
-int  wifi_status_get_rssi(void) { return ws_rssi; }
+bool        wifi_status_is_ready(void)    { return ws_ready; }
+bool        wifi_status_is_ap(void)       { return ws_is_ap; }
+int         wifi_status_get_rssi(void)    { return ws_rssi; }
+const char *wifi_status_get_ssid(void)    { return ws_ssid; }
+const char *wifi_status_get_ip(void)      { return ws_ip; }
+const char *wifi_status_get_ap_pass(void) { return ws_ap_pass; }

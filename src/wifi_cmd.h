@@ -21,6 +21,9 @@ void wifi_log(const char *fmt, ...);
 bool wifi_log_enabled(void);
 
 /* WiFi connection state — updated from ESP #WIFISTATUS replies */
-bool wifi_status_is_ready(void);
-bool wifi_status_is_ap(void);
-int  wifi_status_get_rssi(void);
+bool        wifi_status_is_ready(void);
+bool        wifi_status_is_ap(void);
+int         wifi_status_get_rssi(void);
+const char *wifi_status_get_ssid(void);
+const char *wifi_status_get_ip(void);
+const char *wifi_status_get_ap_pass(void);
