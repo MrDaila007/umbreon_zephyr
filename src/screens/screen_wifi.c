@@ -46,17 +46,6 @@ static void draw_title(int page)
 	u8g2_SetDrawColor(&u8g2, 1);
 }
 
-static void draw_page_dots(int page)
-{
-	for (int i = 0; i < WIFI_PAGE_COUNT; i++) {
-		int x = SCR_W / 2 - (WIFI_PAGE_COUNT * 4) / 2 + i * 8;
-		if (i == page) {
-			u8g2_DrawDisc(&u8g2, x, SCR_H - 2, 2, U8G2_DRAW_ALL);
-		} else {
-			u8g2_DrawCircle(&u8g2, x, SCR_H - 2, 1, U8G2_DRAW_ALL);
-		}
-	}
-}
 
 static void wifi_qr_escape(const char *in, char *out, size_t out_sz)
 {
@@ -286,6 +275,5 @@ void screen_wifi_draw(const struct ui_state *st)
 		draw_web_qr_page();
 	}
 
-	draw_page_dots(page);
 	u8g2_SendBuffer(&u8g2);
 }
