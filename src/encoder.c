@@ -25,9 +25,10 @@ static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw)
 #define ENCODER_POLL_MS    1
 #define ENCODER_REVERSE    false   /* Set to true to reverse rotation direction */	
 
-#define ENC_BTN_DEBOUNCE_MS 50
-#define ENC_BTN_CLICK_MS    500
-#define ENC_BTN_HOLD_MS     600
+#define ENC_BTN_DEBOUNCE_MS   50
+#define ENC_BTN_CLICK_MS     500
+#define ENC_BTN_HOLD_MS      600
+#define ENC_BTN_LONG_HOLD_MS 3000
 
 static K_THREAD_STACK_DEFINE(encoder_stack, ENCODER_STACK_SIZE);
 static struct k_thread encoder_thread_data;
@@ -50,6 +51,7 @@ static bool btn_raw;
 static bool btn_state;
 static bool btn_debouncing;
 static bool btn_hold_sent;
+static bool btn_long_hold_sent;
 static int64_t btn_debounce_ms;
 static int64_t btn_press_ms;
 static int64_t btn_last_click_ms;
@@ -132,6 +134,7 @@ static void process_button_state(bool raw_pressed)
 		if (btn_state) {
 			btn_press_ms = now;
 			btn_hold_sent = false;
+			btn_long_hold_sent = false;
 		} else {
 			if (!btn_hold_sent) {
 				if (btn_last_click_ms > 0 &&
@@ -154,6 +157,12 @@ static void process_button_state(bool raw_pressed)
 		atomic_or(&button_events, ENC_EVT_HOLD);
 		btn_hold_sent = true;
 		btn_last_click_ms = 0;
+	}
+
+	if (btn_state && !btn_long_hold_sent &&
+	    (now - btn_press_ms) >= ENC_BTN_LONG_HOLD_MS) {
+		atomic_or(&button_events, ENC_EVT_LONG_HOLD);
+		btn_long_hold_sent = true;
 	}
 }
 

@@ -283,14 +283,21 @@ static void handle_input(void)
 	int rot = 0;
 	uint8_t events = encoder_poll(&rot);
 
-	bool click = events & ENC_EVT_CLICK;
-	bool held  = events & ENC_EVT_HOLD;
-	bool fast  = events & ENC_EVT_FAST;
+	bool click     = events & ENC_EVT_CLICK;
+	bool held      = events & ENC_EVT_HOLD;
+	bool long_held = events & ENC_EVT_LONG_HOLD;
+	bool fast      = events & ENC_EVT_FAST;
 	int dir = rot;
 
 	if (events || rot != 0) {
 		wifi_log("ENC:rot=%d,ev=%02x,screen=%s,sel=%d",
 			 rot, events, screen_name(st.cur_scr), st.sel);
+	}
+
+	if (long_held && car_is_running) {
+		control_cmd_stop();
+		wifi_log("ENC:long-hold -> STOP");
+		return;
 	}
 
 	if (held) {

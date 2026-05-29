@@ -9,8 +9,9 @@
 #define ENC_EVT_CCW     BIT(1)
 #define ENC_EVT_CLICK   BIT(2)
 #define ENC_EVT_DOUBLE  BIT(3)
-#define ENC_EVT_HOLD    BIT(4)
-#define ENC_EVT_FAST    BIT(5)
+#define ENC_EVT_HOLD      BIT(4)
+#define ENC_EVT_FAST      BIT(5)
+#define ENC_EVT_LONG_HOLD BIT(6)  /* button held ≥ 3 s */
 
 void encoder_init(void);
 
