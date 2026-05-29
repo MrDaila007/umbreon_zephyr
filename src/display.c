@@ -29,7 +29,6 @@
 #include "screens/screen_actions.h"
 #include "screens/screen_confirm.h"
 #include "screens/screen_info.h"
-#include "screens/screen_wifi.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -149,7 +148,7 @@ const struct action_item actions[ACTION_COUNT] = {
 	{"Reset Defaults", ACT_RESET, true},
 };
 
-const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info", "WiFi"};
+const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info"};
 
 /* ─── Parameter helpers ──────────────────────────────────────────────────── */
 
@@ -216,7 +215,6 @@ static const char *screen_name(enum screen scr)
 	case SCR_ACTIONS:         return "actions";
 	case SCR_CONFIRM:         return "confirm";
 	case SCR_INFO:            return "info";
-	case SCR_WIFI:            return "wifi";
 	default:                  return "unknown";
 	}
 }
@@ -230,9 +228,6 @@ static void go_screen(enum screen scr)
 		  scr == SCR_SETTINGS_LIST || scr == SCR_TESTS ||
 		  scr == SCR_ACTIONS) ? 1 : 0;
 	st.scroll = 0;
-	if (scr == SCR_WIFI) {
-		st.wifi_scroll = 0;
-	}
 	wifi_log("DSP:screen %s->%s", screen_name(prev), screen_name(scr));
 }
 
@@ -248,7 +243,6 @@ static void go_back(void)
 	case SCR_ACTIONS:         st.cur_scr = SCR_MAIN_MENU;       break;
 	case SCR_CONFIRM:         st.cur_scr = st.prev_scr;         break;
 	case SCR_INFO:            st.cur_scr = SCR_MAIN_MENU;       break;
-	case SCR_WIFI:            st.cur_scr = SCR_MAIN_MENU;       break;
 	case SCR_TEST_RUNNING:                                       break;
 	default:                  st.cur_scr = SCR_DASHBOARD;       break;
 	}
@@ -329,7 +323,6 @@ static void handle_input(void)
 			case 2: go_screen(SCR_TESTS);           break;
 			case 3: go_screen(SCR_ACTIONS);          break;
 			case 4: go_screen(SCR_INFO);             break;
-			case 5: go_screen(SCR_WIFI);             break;
 			}
 		}
 		break;
@@ -453,22 +446,6 @@ static void handle_input(void)
 		if (dir != 0) st.info_scroll += dir;
 		if (click) { st.info_scroll = 0; go_back(); }
 		break;
-
-	case SCR_WIFI:
-		if (dir != 0) {
-			st.wifi_scroll += dir;
-			if (st.wifi_scroll < 0) {
-				st.wifi_scroll = 0;
-			}
-			if (st.wifi_scroll > 2) {
-				st.wifi_scroll = 2;
-			}
-		}
-		if (click) {
-			st.wifi_scroll = 0;
-			go_back();
-		}
-		break;
 	}
 }
 
@@ -489,7 +466,6 @@ static void draw_current_screen(void)
 	case SCR_ACTIONS:          screen_actions_draw(&st);            break;
 	case SCR_CONFIRM:          screen_confirm_draw(&st);            break;
 	case SCR_INFO:             screen_info_draw(&st);               break;
-	case SCR_WIFI:             screen_wifi_draw(&st);               break;
 	}
 }
 

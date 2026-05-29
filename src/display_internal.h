@@ -16,7 +16,6 @@ enum screen {
 	SCR_ACTIONS,
 	SCR_CONFIRM,
 	SCR_INFO,
-	SCR_WIFI,
 };
 
 /* ─── Navigation state (owned by display.c, read-only for screen modules) ── */
@@ -33,7 +32,6 @@ struct ui_state {
 	bool confirm_yes;
 	const char *confirm_msg;
 	int info_scroll;
-	int wifi_scroll;
 };
 
 /* ─── Display dimensions ─────────────────────────────────────────────────── */
@@ -82,7 +80,7 @@ struct action_item {
 #define GROUP_COUNT    9
 #define TEST_COUNT     8
 #define ACTION_COUNT   5
-#define MAIN_REAL      5
+#define MAIN_REAL      4
 #define LIST_VISIBLE   5
 
 /* ─── Data tables (defined in display.c) ────────────────────────────────── */

@@ -691,7 +691,7 @@ static int vl53l0x_enh_init(const struct device *dev)
 /* ─── Device instantiation ───────────────────────────────────────────────── */
 
 #define VL53L0X_ENH_INIT(inst)                                               \
-	static struct vl53l0x_enh_config vl53l0x_enh_cfg_##inst = {          \
+	static const struct vl53l0x_enh_config vl53l0x_enh_cfg_##inst = {    \
 		.i2c = I2C_DT_SPEC_INST_GET(inst),                          \
 		.xshut = GPIO_DT_SPEC_INST_GET_OR(inst, xshut_gpios, {}),   \
 	};                                                                   \
