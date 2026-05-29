@@ -283,21 +283,14 @@ static void handle_input(void)
 	int rot = 0;
 	uint8_t events = encoder_poll(&rot);
 
-	bool click     = events & ENC_EVT_CLICK;
-	bool held      = events & ENC_EVT_HOLD;
-	bool long_held = events & ENC_EVT_LONG_HOLD;
-	bool fast      = events & ENC_EVT_FAST;
+	bool click = events & ENC_EVT_CLICK;
+	bool held  = events & ENC_EVT_HOLD;
+	bool fast  = events & ENC_EVT_FAST;
 	int dir = rot;
 
 	if (events || rot != 0) {
 		wifi_log("ENC:rot=%d,ev=%02x,screen=%s,sel=%d",
 			 rot, events, screen_name(st.cur_scr), st.sel);
-	}
-
-	if (long_held && car_is_running) {
-		control_cmd_stop();
-		wifi_log("ENC:long-hold -> STOP");
-		return;
 	}
 
 	if (held) {
@@ -533,8 +526,13 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 				? DISPLAY_REFRESH_MS : DISPLAY_MENU_MS;
 			k_msleep(ms);
 		} else {
-			int ignored_rot;
-			(void)encoder_poll(&ignored_rot);
+			int rot = 0;
+			uint8_t events = encoder_poll(&rot);
+
+			if (events & ENC_EVT_LONG_HOLD) {
+				control_cmd_stop();
+				wifi_log("ENC:long-hold -> STOP");
+			}
 			k_msleep(100); /* low-rate poll while car runs */
 		}
 	}
