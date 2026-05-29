@@ -630,12 +630,6 @@ void settings_reset(void)
 	LOG_INF("Settings reset to defaults");
 }
 
-/* ─── NVS accessor for track_learn ────────────────────────────────────────── */
-struct nvs_fs *settings_get_nvs(void)
-{
-	return nvs_ready ? &nvs : NULL;
-}
-
 void settings_lock(void)
 {
 	k_mutex_lock(&cfg_mutex, K_FOREVER);

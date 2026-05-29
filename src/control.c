@@ -14,7 +14,6 @@
 #include "imu.h"
 #include "wifi_cmd.h"
 #include "battery.h"
-#include "track_learn.h"
 #include "display.h"
 
 #include <zephyr/kernel.h>
@@ -412,15 +411,7 @@ static void work(const struct car_settings *c)
 		spd = c->spd_blocked;
 	}
 
-	/* Track learning integration */
-	if (track_learn_get_mode() == TRK_MODE_RACE) {
-		float rec = track_learn_recommend_speed(0.5f);
-		if (rec > 0) {
-			spd = rec;
-		}
-	}
 	int steer_cmd = clamp_steer_cmd((int)(diff * coef));
-	track_learn_tick(steer_cmd, spd);
 
 	/* ── Actuation ─────────────────────────────────────────────────────── */
 	car_write_steer(steer_cmd);
@@ -749,7 +740,6 @@ void control_cmd_stop(void)
 	manual_speed = 0.0f;
 	car_write_speed(0);
 	car_write_steer(0);
-	track_learn_stop();
 	wifi_cmd_send("$ACK\n");
 	wifi_cmd_send("$STS:STOP\n");
 }

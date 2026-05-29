@@ -24,7 +24,6 @@
 #include "control.h"
 #include "battery.h"
 #include "tests.h"
-#include "track_learn.h"
 #include "encoder.h"
 #include "display.h"
 
@@ -149,7 +148,6 @@ int main(void)
 	wdt_feed_kick();
 	battery_init();
 	wifi_cmd_init();
-	track_learn_init();
 	encoder_init();
 	display_init();
 

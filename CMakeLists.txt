@@ -32,7 +32,6 @@ target_sources(app PRIVATE
     src/settings.c
     src/battery.c
     src/tests.c
-    src/track_learn.c
     src/encoder.c
     src/display.c
     src/display_hal.c

@@ -22,7 +22,6 @@
 #include "battery.h"
 #include "control.h"
 #include "tests.h"
-#include "track_learn.h"
 #include "display.h"
 #include "display_hal.h"
 #include "encoder.h"
@@ -683,7 +682,6 @@ static void cmd_help(void)
 		"$L: $DRV:<steer>,<speed> $DRVEN $DRVOFF\n"
 		"$L: $SRV:<angle> $ESC:<us>\n"
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
-		"$L: $TRK:<cmd> (START,STOP,RACE,STATUS,CLEAR)\n"
 		"$L: --- Debug ---\n"
 		"$L: $DIAG $SNS $IMU $PID $SYS $ENC $DSP $HELP\n"
 		"$L: $LOG:ON $LOG:OFF (toggle debug log forwarding)\n"
@@ -782,8 +780,6 @@ static void dispatch_command(const char *line)
 		car_write_steer(0);
 		car_write_speed(0);
 		wifi_cmd_send("$ACK\n");
-	} else if (strncmp(line, "$TRK:", 5) == 0) {
-		track_learn_dispatch(line + 5);
 	/* ── Debug console ─────────────────────────────────────── */
 	} else if (strcmp(line, "$DIAG") == 0) {
 		cmd_diag();
