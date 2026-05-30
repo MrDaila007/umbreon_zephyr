@@ -20,9 +20,6 @@ static const struct gpio_dt_spec enc_clk = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_a),
 static const struct gpio_dt_spec enc_dt  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_b), gpios);
 static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw), gpios);
 
-#define ENCODER_STACK_SIZE 1024
-#define ENCODER_PRIORITY   5
-#define ENCODER_POLL_MS    1
 #define ENCODER_REVERSE    false   /* Set to true to reverse rotation direction */	
 
 #define ENC_BTN_DEBOUNCE_MS   50
@@ -30,7 +27,7 @@ static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw)
 #define ENC_BTN_HOLD_MS      600
 #define ENC_BTN_LONG_HOLD_MS 3000
 
-static K_THREAD_STACK_DEFINE(encoder_stack, ENCODER_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(encoder_stack, CONFIG_APP_ENCODER_STACK_SIZE);
 static struct k_thread encoder_thread_data;
 
 /* ─── Rotation state ─────────────────────────────────────────────────────── */
@@ -177,7 +174,7 @@ static void encoder_thread(void *p1, void *p2, void *p3)
 			process_ab_state(read_ab_state());
 			process_button_state(gpio_pin_get_dt(&enc_sw));
 		}
-		k_msleep(ENCODER_POLL_MS);
+		k_msleep(CONFIG_APP_ENCODER_POLL_INTERVAL_MS);
 	}
 }
 
@@ -232,7 +229,7 @@ void encoder_init(void)
 	k_thread_create(&encoder_thread_data, encoder_stack,
 			K_THREAD_STACK_SIZEOF(encoder_stack),
 			encoder_thread, NULL, NULL, NULL,
-			ENCODER_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_ENCODER_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&encoder_thread_data, "encoder");
 	LOG_INF("Encoder init OK (CLK=GP22, DT=GP12, SW=GP19)");
 }

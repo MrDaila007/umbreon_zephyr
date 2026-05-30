@@ -310,7 +310,7 @@ shown in yellow. Real overlaps are red and block CI.
 | control | 2 | 4096B | 40ms | Sensors, PID, steering, detection |
 | display | 3 | 4096B | 120ms | SSD1306 screen rendering (dashboard, menu, settings, info, WiFi) |
 | wifi_cmd | 5 | 2048B | event | UART command parsing, WiFi status polling |
-| battery | 10 | 1024B | 500ms | Battery ADC monitoring |
+| battery | 10 | 1024B | 50ms default | Battery ADC monitoring |
 | main | — | 4096B | — | Init, then sleeps forever |
 | Tachometer ISR | ISR | — | edge | Pulse counting |
 

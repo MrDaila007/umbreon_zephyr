@@ -28,9 +28,7 @@
 LOG_MODULE_REGISTER(control, LOG_LEVEL_INF);
 
 /* ─── Thread config ───────────────────────────────────────────────────────── */
-#define CONTROL_STACK_SIZE 4096
-#define CONTROL_PRIORITY   2
-static K_THREAD_STACK_DEFINE(control_stack, CONTROL_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(control_stack, CONFIG_APP_CONTROL_STACK_SIZE);
 static struct k_thread control_thread_data;
 
 /* ─── State ───────────────────────────────────────────────────────────────── */
@@ -626,7 +624,7 @@ void control_init(void)
 	k_thread_create(&control_thread_data, control_stack,
 			K_THREAD_STACK_SIZEOF(control_stack),
 			control_thread, NULL, NULL, NULL,
-			CONTROL_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_CONTROL_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&control_thread_data, "control");
 
 	LOG_INF("Control thread created");

@@ -39,12 +39,7 @@
 LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 
 /* ─── Thread config ──────────────────────────────────────────────────────── */
-#define DISPLAY_STACK_SIZE   4096
-#define DISPLAY_PRIORITY     8
-#define DISPLAY_REFRESH_MS   120  /* dashboard: ~8 FPS, sensor bars don't need more */
-#define DISPLAY_MENU_MS       50  /* menus: fast encoder response */
-
-static K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(display_stack, CONFIG_APP_DISPLAY_STACK_SIZE);
 static struct k_thread display_thread_data;
 
 /* ─── I2C0 bus mutex (shared with imu.c) ─────────────────────────────────── */
@@ -311,7 +306,7 @@ static void handle_input(void)
 
 	switch (st.cur_scr) {
 	case SCR_DASHBOARD:
-#if !IS_ENABLED(CONFIG_DISPLAY_DASHBOARD_ONLY)
+#if !IS_ENABLED(CONFIG_APP_DISPLAY_DASHBOARD_ONLY)
 		if (click) go_screen(SCR_MAIN_MENU);
 #endif
 		break;
@@ -533,7 +528,8 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 			}
 
 			int ms = (st.cur_scr == SCR_DASHBOARD)
-				? DISPLAY_REFRESH_MS : DISPLAY_MENU_MS;
+				? CONFIG_APP_DISPLAY_REFRESH_INTERVAL_MS
+				: CONFIG_APP_DISPLAY_MENU_INTERVAL_MS;
 			k_msleep(ms);
 		} else {
 			int rot = 0;
@@ -555,7 +551,7 @@ void display_init(void)
 	k_thread_create(&display_thread_data, display_stack,
 			K_THREAD_STACK_SIZEOF(display_stack),
 			display_thread_fn, NULL, NULL, NULL,
-			DISPLAY_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_DISPLAY_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&display_thread_data, "display");
 }
 

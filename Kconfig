@@ -1,6 +1,8 @@
 source "Kconfig.zephyr"
 
-config DISPLAY_DASHBOARD_ONLY
+menu "Umbreon application"
+
+config APP_DISPLAY_DASHBOARD_ONLY
 	bool "Dashboard-only display mode"
 	default n
 	help
@@ -8,3 +10,108 @@ config DISPLAY_DASHBOARD_ONLY
 	  The main menu, settings, tests and actions are inaccessible.
 	  Useful for competition builds where accidental menu entry must
 	  be prevented.
+
+menu "Thread configuration"
+
+config APP_CONTROL_STACK_SIZE
+	int "Control thread stack size"
+	range 512 16384
+	default 4096
+
+config APP_CONTROL_PRIORITY
+	int "Control thread priority"
+	range 0 15
+	default 2
+
+config APP_WIFI_CMD_STACK_SIZE
+	int "WiFi command thread stack size"
+	range 512 16384
+	default 2048
+
+config APP_WIFI_CMD_PRIORITY
+	int "WiFi command thread priority"
+	range 0 15
+	default 5
+
+config APP_WIFI_ASYNC_STACK_SIZE
+	int "WiFi async worker stack size"
+	range 512 16384
+	default 3072
+
+config APP_WIFI_ASYNC_PRIORITY
+	int "WiFi async worker priority"
+	range 0 15
+	default 6
+
+config APP_DEBUG_UART_STACK_SIZE
+	int "Debug UART command thread stack size"
+	range 512 16384
+	default 4096
+
+config APP_DEBUG_UART_PRIORITY
+	int "Debug UART command thread priority"
+	range 0 15
+	default 7
+
+config APP_DISPLAY_STACK_SIZE
+	int "Display thread stack size"
+	range 512 16384
+	default 4096
+
+config APP_DISPLAY_PRIORITY
+	int "Display thread priority"
+	range 0 15
+	default 8
+
+config APP_ENCODER_STACK_SIZE
+	int "Encoder thread stack size"
+	range 512 16384
+	default 1024
+
+config APP_ENCODER_PRIORITY
+	int "Encoder thread priority"
+	range 0 15
+	default 5
+
+config APP_BATTERY_STACK_SIZE
+	int "Battery thread stack size"
+	range 512 16384
+	default 1024
+
+config APP_BATTERY_PRIORITY
+	int "Battery thread priority"
+	range 0 15
+	default 10
+
+endmenu
+
+menu "Polling intervals"
+
+config APP_DISPLAY_REFRESH_INTERVAL_MS
+	int "Display dashboard refresh interval in milliseconds"
+	range 1 60000
+	default 120
+
+config APP_DISPLAY_MENU_INTERVAL_MS
+	int "Display menu refresh interval in milliseconds"
+	range 1 60000
+	default 50
+
+config APP_ENCODER_POLL_INTERVAL_MS
+	int "Encoder poll interval in milliseconds"
+	range 1 60000
+	default 1
+
+config APP_BATTERY_SAMPLE_INTERVAL_MS
+	int "Battery sample interval in milliseconds"
+	range 1 60000
+	default 50
+
+config APP_SENSOR_I2C_SCAN_INTERVAL_MS
+	int "Sensor I2C health scan interval in milliseconds"
+	range 1 60000
+	default 1000
+
+endmenu
+
+endmenu

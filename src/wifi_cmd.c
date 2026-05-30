@@ -82,14 +82,10 @@ static char ws_ip[20];
 static char ws_ap_pass[64];
 
 /* ─── Thread ──────────────────────────────────────────────────────────────── */
-#define WIFI_STACK_SIZE 2048
-#define WIFI_PRIORITY   5
-static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(wifi_stack, CONFIG_APP_WIFI_CMD_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
-#define DEBUG_UART_STACK_SIZE 4096
-#define DEBUG_UART_PRIORITY   7
-static K_THREAD_STACK_DEFINE(debug_uart_stack, DEBUG_UART_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(debug_uart_stack, CONFIG_APP_DEBUG_UART_STACK_SIZE);
 static struct k_thread debug_uart_thread_data;
 
 static K_MUTEX_DEFINE(debug_uart_tx_mutex);
@@ -148,9 +144,7 @@ static void sync_tach_glitch_filter(void)
 }
 
 /* ─── Async command worker (long-running commands) ──────────────────────── */
-#define WIFI_ASYNC_STACK_SIZE 3072
-#define WIFI_ASYNC_PRIORITY   6
-static K_THREAD_STACK_DEFINE(wifi_async_stack, WIFI_ASYNC_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(wifi_async_stack, CONFIG_APP_WIFI_ASYNC_STACK_SIZE);
 static struct k_thread wifi_async_thread_data;
 
 enum async_cmd_kind {
@@ -919,20 +913,20 @@ void wifi_cmd_init(void)
 	k_thread_create(&wifi_thread_data, wifi_stack,
 			K_THREAD_STACK_SIZEOF(wifi_stack),
 			wifi_cmd_thread, NULL, NULL, NULL,
-			WIFI_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_WIFI_CMD_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_thread_data, "wifi_cmd");
 
 	k_thread_create(&wifi_async_thread_data, wifi_async_stack,
 			K_THREAD_STACK_SIZEOF(wifi_async_stack),
 			wifi_async_thread, NULL, NULL, NULL,
-			WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_async_thread_data, "wifi_async");
 
 	if (debug_uart_dev) {
 		k_thread_create(&debug_uart_thread_data, debug_uart_stack,
 				K_THREAD_STACK_SIZEOF(debug_uart_stack),
 				debug_uart_thread, NULL, NULL, NULL,
-				DEBUG_UART_PRIORITY, 0, K_NO_WAIT);
+				CONFIG_APP_DEBUG_UART_PRIORITY, 0, K_NO_WAIT);
 		k_thread_name_set(&debug_uart_thread_data, "debug_uart_cmd");
 	}
 

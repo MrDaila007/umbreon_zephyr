@@ -31,7 +31,6 @@ LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
 #define SENSOR_OOR_MIN_BAD 3
 #define SENSOR_OOR_MIN_GOOD 2
 #define SENSOR_OOR_GOOD_MAX 1200
-#define SENSOR_I2C_SCAN_INTERVAL_MS 1000
 #define VL53L0X_WHO_AM_I_REG 0xC0
 #define VL53L0X_DEFAULT_ADDR 0x29
 #define VL53L0X_EXPECTED_MASK 0x3f
@@ -264,7 +263,7 @@ static void check_i2c_health(void)
 {
 	int64_t now = k_uptime_get();
 
-	if (now - last_i2c_scan_ms < SENSOR_I2C_SCAN_INTERVAL_MS) {
+	if (now - last_i2c_scan_ms < CONFIG_APP_SENSOR_I2C_SCAN_INTERVAL_MS) {
 		return;
 	}
 	last_i2c_scan_ms = now;

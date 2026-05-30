@@ -38,5 +38,5 @@
 - Build dir: `$(ZEPHYR_DIR)/build` (configurable via Makefile)
 - WiFi protocol: UART1 (GP4/GP5) with ESP8266, ASCII commands prefixed with `$`
 - Source layout: `src/` contains main.c, car.c, sensors.c, imu.c, etc.
-- Threads: control (40ms), wifi_cmd (event), battery (500ms), main
+- Threads: control (40ms), wifi_cmd (event), battery (50ms default), main
 - Settings: NVS storage, modify via `$SET:KEY=VAL` commands over WiFi/UART
