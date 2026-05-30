@@ -12,6 +12,10 @@ env:
   U8G2_REVISION: cbceaa1cab22ad63e41c2df684e173cd5433766e
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Host unit tests (gcc, no Zephyr)
   test-host:
