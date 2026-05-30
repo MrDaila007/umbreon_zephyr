@@ -314,18 +314,17 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
 
 ---
 
-## Часть 4: Workflow для self-hosted runner
+## Часть 4: Workflow
 
-- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject` (§3.5).
+- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) теперь запускается на GitHub-hosted `ubuntu-latest`; Zephyr workspace поднимается через `west init -l app`.
   - `check-ui` — параллельный job, запускает `tools/sim_dashboard.py` (Pillow), загружает `sim_dashboard.png` как артефакт. Не блокирует сборку.
   - `build` — сборка прошивки, загружает `zephyr.uf2`.
   - `test-host` — host unit-тесты (gcc, без Zephyr).
-  - `test-ztest` — Zephyr ztest на `native_sim` (нужны `gcc-multilib`, `g++-multilib`).
+  - `test-ztest` — Zephyr ztest на `native_sim`.
 - **umbreon_esp_web:** [`umbreon_esp_web/.github/workflows/build.yml`](../../umbreon_esp_web/.github/workflows/build.yml) — тот же `runs-on`, `~/ESP8266_RTOS_SDK` (§3.6).
 - **Umbreon_roborace:** [`Umbreon_roborace/.github/workflows/ci.yml`](../../Umbreon_roborace/.github/workflows/ci.yml) — Arduino/Python/Docker; см. [`Umbreon_roborace/docs/self-hosted-ci.md`](../../Umbreon_roborace/docs/self-hosted-ci.md).
-- **Резервная копия облачного Zephyr CI:** [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml).
 
-У раннера в `config.sh` / настройках GitHub должны быть те же labels: `self-hosted`, `linux`, `embedded`.
+Self-hosted runner больше не нужен для обычного CI. Он остаётся полезным для HIL, прошивки через OpenOCD и smoke-тестов на реальном железе. Для таких jobs у раннера в `config.sh` / настройках GitHub должны быть labels: `self-hosted`, `linux`, `embedded`.
 
 ### Опционально: HIL (прошивка + smoke по UART)
 
@@ -342,7 +341,7 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
         run: |
           openocd -f interface/stlink.cfg -f target/rp2350.cfg \
             -c "adapter speed 5000" \
-            -c "program ${HOME}/zephyrproject/build/zephyr/zephyr.elf verify reset exit"
+            -c "program ${GITHUB_WORKSPACE}/build/zephyr/zephyr.elf verify reset exit"
 
       - name: Smoke test (UART)
         run: |

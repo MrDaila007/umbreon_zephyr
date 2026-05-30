@@ -1,7 +1,7 @@
-# Резервная копия облачного CI (GitHub-hosted ubuntu-latest + Zephyr Docker image).
-# Актуальный пайплайн для локального runner: .github/workflows/build.yml
+# Историческая резервная копия облачного CI.
+# Актуальный GitHub-hosted pipeline: .github/workflows/build.yml
 #
-# Сохранено: переключение на self-hosted — см. README / docs/self-hosted-ci.md
+# Self-hosted/HIL setup сохранён отдельно в docs/self-hosted-ci.md
 
 name: CI
 
@@ -63,13 +63,13 @@ jobs:
 
       - name: Build firmware
         working-directory: zephyrproject
-        run: west build -b rpi_pico2/rp2350a/m33 --pristine always $GITHUB_WORKSPACE/app
+        run: west build -b rpi_pico2/rp2350a/m33 -d $GITHUB_WORKSPACE/app/build --pristine always $GITHUB_WORKSPACE/app
 
       - name: Upload UF2
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: zephyrproject/build/zephyr/zephyr.uf2
+          path: app/build/zephyr/zephyr.uf2
 
   # ── Zephyr ztest (native_sim) ── runs after build succeeds ────────────────
   test-ztest:
@@ -108,5 +108,5 @@ jobs:
       - name: Run ztest
         working-directory: zephyrproject
         run: |
-          west build -b native_sim -d /tmp/ztest $GITHUB_WORKSPACE/app/tests/ztest
-          /tmp/ztest/zephyr/zephyr.exe
+          west build -b native_sim -d $GITHUB_WORKSPACE/app/build/ztest $GITHUB_WORKSPACE/app/tests/ztest
+          $GITHUB_WORKSPACE/app/build/ztest/zephyr/zephyr.exe

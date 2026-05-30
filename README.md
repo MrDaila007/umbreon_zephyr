@@ -134,7 +134,7 @@ Or manually:
 
 ```bash
 cd ~/zephyrproject-v4.4 && source .venv/bin/activate
-west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr
+west build -b rpi_pico2/rp2350a/m33 -d /path/to/umbreon_zephyr/build --pristine always /path/to/umbreon_zephyr
 ```
 
 ### Flash

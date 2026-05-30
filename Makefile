@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 BOARD        ?= rpi_pico2/rp2350a/m33
 ZEPHYR_DIR   ?= $(HOME)/zephyrproject-v4.4
-BUILD_DIR    ?= $(ZEPHYR_DIR)/build
+BUILD_DIR    ?= $(CURDIR)/build
 SRC_DIR      ?= $(CURDIR)
 MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
@@ -42,17 +42,17 @@ check-ui:
 build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
-	west build -b $(BOARD) $(SRC_DIR) --pristine always
+	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR)
 
 build-usb:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
-	west build -b $(BOARD) $(SRC_DIR) --pristine always -- -DUSB_CONSOLE=ON
+	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR) -- -DUSB_CONSOLE=ON
 
 build-hil:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
-	west build -b $(BOARD) $(SRC_DIR) --pristine always -- -DHIL_NO_SENSORS=ON
+	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR) -- -DHIL_NO_SENSORS=ON
 
 flash:
 	cp $(BUILD_DIR)/zephyr/zephyr.uf2 $(MOUNT_POINT)/

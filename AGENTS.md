@@ -8,7 +8,7 @@
 - Standard (UART0 console): `make build`
 - USB console: `make build-usb`
 - HIL (no sensors): `make build-hil`
-- Manual west build: `cd ~/zephyrproject-v4.4 && source .venv/bin/activate && west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr`
+- Manual west build: `cd ~/zephyrproject-v4.4 && source .venv/bin/activate && west build -b rpi_pico2/rp2350a/m33 -d /path/to/umbreon_zephyr/build --pristine always /path/to/umbreon_zephyr`
 
 ## Flash
 - UF2 (BOOTSEL): `make flash`
@@ -35,7 +35,7 @@
 ## Notes
 - Zephyr dir: `~/zephyrproject-v4.4` (adjust in Makefile if needed)
 - SDK dir: `~/zephyr-sdk-1.0.0` (adjust in setup_zephyr.sh if needed)
-- Build dir: `$(ZEPHYR_DIR)/build` (configurable via Makefile)
+- Build dir: `./build` in the project root (configurable via Makefile)
 - WiFi protocol: UART1 (GP4/GP5) with ESP8266, ASCII commands prefixed with `$`
 - Source layout: `src/` contains main.c, car.c, sensors.c, imu.c, etc.
 - Threads: control (40ms), wifi_cmd (event), battery (50ms default), main

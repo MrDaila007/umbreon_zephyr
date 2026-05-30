@@ -7,14 +7,14 @@ on:
     branches: [main]
 
 env:
-  ZEPHYR_VERSION: v4.4.0
+  ZEPHYR_SDK_VERSION: "1.0.0"
   ZEPHYR_SDK_INSTALL_DIR: /opt/zephyr-sdk-1.0.0
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # ── Host unit tests (gcc, no Zephyr) ──────────────────────────────────────
+  # Host unit tests (gcc, no Zephyr)
   test-host:
-    runs-on: [self-hosted, linux, embedded]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -22,14 +22,14 @@ jobs:
         working-directory: tests
         run: make test-host
 
-  # ── UI overlap check (PIL simulator, no Zephyr required) ─────────────────
+  # UI overlap check (PIL simulator, no Zephyr required)
   check-ui:
-    runs-on: [self-hosted, linux, embedded]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Pillow
-        run: pip install --quiet pillow
+        run: python3 -m pip install --quiet pillow
 
       - name: Check dashboard UI overlaps
         run: python3 tools/sim_dashboard.py
@@ -41,39 +41,71 @@ jobs:
           name: sim-dashboard
           path: tools/sim_dashboard.png
 
-  # ── Firmware build (RP2350) — предустановленный Zephyr workspace на runner ─
+  # Firmware build (RP2350) on GitHub-hosted runner
   build:
-    runs-on: [self-hosted, linux, embedded]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: sdk-${{ env.ZEPHYR_SDK_VERSION }}
+
+      - name: Install Zephyr SDK
+        run: |
+          set -euo pipefail
+          if [ ! -d "$ZEPHYR_SDK_INSTALL_DIR" ]; then
+            wget -q "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+            tar xf "zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz" -C /opt/
+            rm -f "zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+            cd "$ZEPHYR_SDK_INSTALL_DIR"
+            ./setup.sh -t arm-zephyr-eabi -c
+          fi
+
+      - name: Initialize west workspace
+        run: |
+          set -euo pipefail
+          west init -l app
+          west update --narrow -o=--depth=1
+          python3 -m pip install -r zephyr/scripts/requirements.txt
 
       - name: Build firmware
         run: |
           set -euo pipefail
-          source "${HOME}/zephyrproject/.venv/bin/activate"
-          cd "${HOME}/zephyrproject"
-          export ZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK_INSTALL_DIR}"
-          west build -b rpi_pico2/rp2350a/m33 --pristine always "${GITHUB_WORKSPACE}"
-          echo "ZEPHYR_UF2=${HOME}/zephyrproject/build/zephyr/zephyr.uf2" >> "$GITHUB_ENV"
+          west build -b rpi_pico2/rp2350a/m33 -d app/build --pristine always app
 
       - name: Upload UF2
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: ${{ env.ZEPHYR_UF2 }}
+          path: app/build/zephyr/zephyr.uf2
 
-  # ── Zephyr ztest (native_sim, gcc -m32) — на runner нужны gcc-multilib g++-multilib
+  # Zephyr ztest (native_sim)
   test-ztest:
     needs: build
-    runs-on: [self-hosted, linux, embedded]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: app
 
-      - name: Run ztest (native_sim)
+      - name: Initialize west workspace
         run: |
           set -euo pipefail
-          source "${HOME}/zephyrproject/.venv/bin/activate"
-          cd "${HOME}/zephyrproject"
-          export ZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK_INSTALL_DIR}"
-          west build -b native_sim -d /tmp/ztest "${GITHUB_WORKSPACE}/tests/ztest"
-          /tmp/ztest/zephyr/zephyr.exe
+          west init -l app
+          west update --narrow -o=--depth=1
+          python3 -m pip install -r zephyr/scripts/requirements.txt
+
+      - name: Run ztest
+        run: |
+          set -euo pipefail
+          west build -b native_sim -d app/build/ztest --pristine always app/tests/ztest
+          app/build/ztest/zephyr/zephyr.exe
