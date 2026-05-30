@@ -23,7 +23,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(track_learn, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(track_learn, CONFIG_APP_LOG_LEVEL);
 
 /* ─── Constants ───────────────────────────────────────────────────────────── */
 #define TRK_MAGIC           0x4B435254  /* "TRCK" */

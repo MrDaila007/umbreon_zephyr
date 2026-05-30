@@ -1,7 +1,7 @@
 # Umbreon Zephyr — Autonomous Roborace Firmware
 
 Firmware for the Umbreon autonomous racing robot running on Zephyr RTOS.
-Targets Zephyr v4.3 (recommended) for RP2350 (Raspberry Pi Pico 2).
+Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 
 ## Hardware
 
@@ -38,8 +38,8 @@ git clone <repo-url> && cd umbreon_zephyr
 
 This will:
 1. Install system packages (cmake, ninja, dtc, ccache, etc.)
-2. Download and install [Zephyr SDK 0.17](https://github.com/zephyrproject-rtos/sdk-ng) with ARM toolchain
-3. Initialize Zephyr v4.3 workspace at `~/zephyrproject-v4.3`
+2. Download and install [Zephyr SDK 1.0](https://github.com/zephyrproject-rtos/sdk-ng) with ARM toolchain
+3. Initialize Zephyr v4.4 workspace at `~/zephyrproject-v4.4`
 4. Create Python venv and install all dependencies
 
 Run `./setup_zephyr.sh --help` for all options.
@@ -60,9 +60,9 @@ sudo apt-get install -y git cmake ninja-build python3 python3-pip \
 #### 2. Zephyr SDK
 
 ```bash
-wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
-tar xf zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz -C ~/
-cd ~/zephyr-sdk-0.17.0
+wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v1.0.1/zephyr-sdk-1.0.1_linux-x86_64_minimal.tar.xz
+tar xf zephyr-sdk-1.0.1_linux-x86_64_minimal.tar.xz -C ~/
+cd ~/zephyr-sdk-1.0.1
 ./setup.sh -t arm-zephyr-eabi -c
 ```
 
@@ -70,18 +70,18 @@ cd ~/zephyr-sdk-0.17.0
 
 ```bash
 pip3 install --user west
-west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0 ~/zephyrproject-v4.3
-cd ~/zephyrproject-v4.3
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 ~/zephyrproject-v4.4
+cd ~/zephyrproject-v4.4
 west update --narrow -o=--depth=1
 ```
 
 #### 4. Python venv
 
 ```bash
-python3 -m venv ~/zephyrproject-v4.3/.venv
-source ~/zephyrproject-v4.3/.venv/bin/activate
+python3 -m venv ~/zephyrproject-v4.4/.venv
+source ~/zephyrproject-v4.4/.venv/bin/activate
 pip install west
-pip install -r ~/zephyrproject-v4.3/zephyr/scripts/requirements.txt
+pip install -r ~/zephyrproject-v4.4/zephyr/scripts/requirements.txt
 ```
 
 </details>
@@ -113,7 +113,7 @@ make build-usb              # USB CDC-ACM console instead
 Or manually:
 
 ```bash
-cd ~/zephyrproject-v4.3 && source .venv/bin/activate
+cd ~/zephyrproject-v4.4 && source .venv/bin/activate
 west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr
 ```
 

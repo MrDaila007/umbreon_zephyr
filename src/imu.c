@@ -17,7 +17,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(imu, CONFIG_APP_LOG_LEVEL);
 
 /* ─── Constants ───────────────────────────────────────────────────────────── */
 #define IMU_EMA_ALPHA  0.3f   /* EMA smoothing (low = smooth, high = responsive) */
@@ -37,7 +37,7 @@ static int64_t prev_us;
 
 void imu_init(void)
 {
-	mpu_dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(mpu6050));
+	mpu_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(imu_sensor));
 	if (!mpu_dev || !device_is_ready(mpu_dev)) {
 		LOG_WRN("MPU-6050 not ready");
 		mpu_ok = false;

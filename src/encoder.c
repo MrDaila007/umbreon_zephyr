@@ -13,12 +13,12 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 
-LOG_MODULE_REGISTER(encoder, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(encoder, CONFIG_APP_LOG_LEVEL);
 
 /* ─── GPIO specs from devicetree ─────────────────────────────────────────── */
-static const struct gpio_dt_spec enc_clk = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_a), gpios);
-static const struct gpio_dt_spec enc_dt  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_b), gpios);
-static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw), gpios);
+static const struct gpio_dt_spec enc_clk = GPIO_DT_SPEC_GET(DT_ALIAS(encoder_clk), gpios);
+static const struct gpio_dt_spec enc_dt  = GPIO_DT_SPEC_GET(DT_ALIAS(encoder_dt), gpios);
+static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_ALIAS(encoder_sw), gpios);
 
 static struct gpio_callback clk_cb_data;
 static struct gpio_callback sw_cb_data;

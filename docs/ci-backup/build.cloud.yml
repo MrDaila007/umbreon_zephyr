@@ -12,9 +12,9 @@ on:
     branches: [main]
 
 env:
-  ZEPHYR_VERSION: v4.3.0
-  ZEPHYR_SDK_VERSION: "0.17.0"
-  ZEPHYR_SDK_INSTALL_DIR: /opt/zephyr-sdk-0.17.0
+  ZEPHYR_VERSION: v4.4.0
+  ZEPHYR_SDK_VERSION: "1.0.1"
+  ZEPHYR_SDK_INSTALL_DIR: /opt/zephyr-sdk-1.0.1
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:

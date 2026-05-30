@@ -18,10 +18,10 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(tachometer, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(tachometer, CONFIG_APP_LOG_LEVEL);
 
 /* ─── GPIO ────────────────────────────────────────────────────────────────── */
-static const struct gpio_dt_spec tach_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(tach_pin), gpios);
+static const struct gpio_dt_spec tach_gpio = GPIO_DT_SPEC_GET(DT_ALIAS(tachometer), gpios);
 static struct gpio_callback tach_cb_data;
 
 /* ─── Shared state (ISR writes, main reads — all atomic) ──────────────────── */

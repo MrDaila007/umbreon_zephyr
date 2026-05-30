@@ -91,14 +91,14 @@ This was dropped in the Zephyr port — all configuration is via WiFi commands.
 
 ## Zephyr Version Notes
 
-**Recommended: Zephyr v4.3.0+** — RP2350 flash support is upstream, no patches needed.
+**Recommended: Zephyr v4.4.0+** — RP2350 flash support is upstream, no patches needed.
 
-### v4.1 → v4.3 migration (done 2026-03-26)
+### v4.1 → v4.4 migration (done 2026-03-26)
 
 - Removed cherry-picks for RP2350 flash (`5d36e85b99a`, `5d7744c`) — now upstream
 - DTS `partitions` node must explicitly declare `compatible = "fixed-partitions"`,
-  `#address-cells = <1>`, `#size-cells = <1>` (optional in v4.1, required in v4.3)
-- CI updated from v4.1 to v4.3, cherry-pick step removed
+  `#address-cells = <1>`, `#size-cells = <1>` (optional in v4.1, required in v4.4)
+- CI updated from v4.1 to v4.4, cherry-pick step removed
 
 ### Legacy: Build workarounds for Zephyr v4.1
 

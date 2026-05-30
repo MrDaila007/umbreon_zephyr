@@ -1,0 +1,14 @@
+mainmenu "Umbreon Zephyr"
+
+source "Kconfig.zephyr"
+
+menu "Umbreon application"
+
+config APP_LOG_LEVEL
+	int "Application log level"
+	range 0 4
+	default 3
+	help
+	  Common log level for application modules.
+
+endmenu

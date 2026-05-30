@@ -16,7 +16,7 @@
 #include <math.h>
 #include <string.h>
 
-LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(settings, CONFIG_APP_LOG_LEVEL);
 
 /* ─── NVS setup ───────────────────────────────────────────────────────────── */
 #define NVS_PARTITION      storage_partition

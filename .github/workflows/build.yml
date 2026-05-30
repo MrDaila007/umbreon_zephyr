@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 env:
-  ZEPHYR_VERSION: v4.3.0
+  ZEPHYR_VERSION: v4.4.0
+  ZEPHYR_WORKSPACE: zephyrproject-v4.4
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -30,10 +31,10 @@ jobs:
       - name: Build firmware
         run: |
           set -euo pipefail
-          source "${HOME}/zephyrproject/.venv/bin/activate"
-          cd "${HOME}/zephyrproject"
+          source "${HOME}/${ZEPHYR_WORKSPACE}/.venv/bin/activate"
+          cd "${HOME}/${ZEPHYR_WORKSPACE}"
           west build -b rpi_pico2/rp2350a/m33 --pristine always "${GITHUB_WORKSPACE}"
-          echo "ZEPHYR_UF2=${HOME}/zephyrproject/build/zephyr/zephyr.uf2" >> "$GITHUB_ENV"
+          echo "ZEPHYR_UF2=${HOME}/${ZEPHYR_WORKSPACE}/build/zephyr/zephyr.uf2" >> "$GITHUB_ENV"
 
       - name: Upload UF2
         uses: actions/upload-artifact@v4
@@ -51,7 +52,7 @@ jobs:
       - name: Run ztest (native_sim)
         run: |
           set -euo pipefail
-          source "${HOME}/zephyrproject/.venv/bin/activate"
-          cd "${HOME}/zephyrproject"
+          source "${HOME}/${ZEPHYR_WORKSPACE}/.venv/bin/activate"
+          cd "${HOME}/${ZEPHYR_WORKSPACE}"
           west build -b native_sim -d /tmp/ztest "${GITHUB_WORKSPACE}/tests/ztest"
           /tmp/ztest/zephyr/zephyr.exe

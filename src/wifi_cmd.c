@@ -24,6 +24,8 @@
 #include "track_learn.h"
 #include "display.h"
 
+#include <app/app_version.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
@@ -33,7 +35,7 @@
 #include <string.h>
 #include <stdarg.h>
 
-LOG_MODULE_REGISTER(wifi_cmd, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(wifi_cmd, CONFIG_APP_LOG_LEVEL);
 
 /* ─── UART device ─────────────────────────────────────────────────────────── */
 static const struct device *uart_dev;
@@ -404,12 +406,12 @@ static void cmd_get(void)
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
 		",TGF=%d"
-		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
+		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=%s\n",
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
 		(double)c.bat_low, c.tach_glitch_filter_us,
-		SENSOR_COUNT, MAX_SENSOR_RANGE);
+		SENSOR_COUNT, MAX_SENSOR_RANGE, APP_VERSION_STRING);
 }
 
 /* ─── SET command ─────────────────────────────────────────────────────────── */
@@ -717,7 +719,7 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 
 void wifi_cmd_init(void)
 {
-	uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
+	uart_dev = DEVICE_DT_GET(DT_ALIAS(wifi_uart));
 	if (!device_is_ready(uart_dev)) {
 		LOG_ERR("UART1 not ready");
 		return;

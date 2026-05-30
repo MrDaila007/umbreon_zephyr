@@ -23,6 +23,28 @@
 		zephyr,flash-controller = &qmi;
 	};
 
+	aliases {
+		steering-servo = &servo;
+		motor-esc = &esc;
+		tachometer = &tach_pin;
+		encoder-clk = &enc_a;
+		encoder-dt = &enc_b;
+		encoder-sw = &enc_sw;
+		wifi-uart = &uart1;
+		imu-sensor = &mpu6050;
+		battery-adc = &adc;
+		display-i2c = &i2c_oled;
+		oled-display = &ssd1306;
+		app-watchdog = &wdt0;
+		tof-i2c = &i2c1;
+		tof-hard-right = &vl53l0x_0;
+		tof-front-right = &vl53l0x_1;
+		tof-right = &vl53l0x_2;
+		tof-left = &vl53l0x_3;
+		tof-front-left = &vl53l0x_4;
+		tof-hard-left = &vl53l0x_5;
+	};
+
 	pwmleds {
 		compatible = "pwm-leds";
 		servo: servo_pwm {

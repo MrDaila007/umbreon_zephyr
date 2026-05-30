@@ -22,7 +22,7 @@
 #include <vl53l0x_enhanced.h>
 #endif
 
-LOG_MODULE_REGISTER(sensors, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(sensors, CONFIG_APP_LOG_LEVEL);
 
 #define VL53L0X_MAX_RAW  8190  /* sensor overflow / out-of-range indicator */
 
@@ -37,8 +37,8 @@ static bool vl53_valid[SENSOR_COUNT];
 extern void wdt_feed_kick(void);
 
 /* ─── Sensor nodelabel → device mapping ───────────────────────────────────── */
-#define VL53_DEV(idx, label) \
-	vl53_devs[idx] = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(label))
+	#define VL53_DEV(idx, alias) \
+		vl53_devs[idx] = DEVICE_DT_GET_OR_NULL(DT_ALIAS(alias))
 #endif
 
 /* ─── Init ────────────────────────────────────────────────────────────────── */
@@ -47,7 +47,7 @@ void sensors_init(void)
 {
 #if CONFIG_DT_HAS_ST_VL53L0X_ENABLED
 	/* Try I2C bus recovery before initializing sensors */
-	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+	const struct device *i2c1 = DEVICE_DT_GET(DT_ALIAS(tof_i2c));
 	if (device_is_ready(i2c1)) {
 		int rc = i2c_recover_bus(i2c1);
 		if (rc == 0) {
@@ -60,12 +60,12 @@ void sensors_init(void)
 	}
 
 	/* Get device handles — order matches sensor_config.h indices */
-	VL53_DEV(0, vl53l0x_0);  /* IDX_HARD_RIGHT  — XSHUT GP6  */
-	VL53_DEV(1, vl53l0x_1);  /* IDX_FRONT_RIGHT — XSHUT GP7  */
-	VL53_DEV(2, vl53l0x_2);  /* IDX_RIGHT       — XSHUT GP8  */
-	VL53_DEV(3, vl53l0x_3);  /* IDX_LEFT        — XSHUT GP9  */
-	VL53_DEV(4, vl53l0x_4);  /* IDX_FRONT_LEFT  — XSHUT GP14 */
-	VL53_DEV(5, vl53l0x_5);  /* IDX_HARD_LEFT   — XSHUT GP15 */
+	VL53_DEV(0, tof_hard_right);   /* IDX_HARD_RIGHT  — XSHUT GP6  */
+	VL53_DEV(1, tof_front_right);  /* IDX_FRONT_RIGHT — XSHUT GP7  */
+	VL53_DEV(2, tof_right);        /* IDX_RIGHT       — XSHUT GP8  */
+	VL53_DEV(3, tof_left);         /* IDX_LEFT        — XSHUT GP9  */
+	VL53_DEV(4, tof_front_left);   /* IDX_FRONT_LEFT  — XSHUT GP14 */
+	VL53_DEV(5, tof_hard_left);    /* IDX_HARD_LEFT   — XSHUT GP15 */
 
 	online_count = 0;
 	for (int i = 0; i < SENSOR_COUNT; i++) {

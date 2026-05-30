@@ -26,7 +26,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(tests, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(tests, CONFIG_APP_LOG_LEVEL);
 
 /* ─── Abort check ─────────────────────────────────────────────────────────── */
 extern void wdt_feed_kick(void);

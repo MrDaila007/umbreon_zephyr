@@ -18,11 +18,11 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(car, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(car, CONFIG_APP_LOG_LEVEL);
 
 /* ─── PWM devices ─────────────────────────────────────────────────────────── */
-static const struct pwm_dt_spec servo_pwm = PWM_DT_SPEC_GET(DT_NODELABEL(servo));
-static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
+static const struct pwm_dt_spec servo_pwm = PWM_DT_SPEC_GET(DT_ALIAS(steering_servo));
+static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_ALIAS(motor_esc));
 
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;

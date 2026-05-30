@@ -26,7 +26,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-LOG_MODULE_REGISTER(control, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(control, CONFIG_APP_LOG_LEVEL);
 
 /* ─── Thread config ───────────────────────────────────────────────────────── */
 #define CONTROL_STACK_SIZE 4096

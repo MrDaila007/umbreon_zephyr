@@ -15,7 +15,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(battery, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(battery, CONFIG_APP_LOG_LEVEL);
 
 /* ─── ADC config ──────────────────────────────────────────────────────────── */
 static const struct device *adc_dev;
@@ -90,7 +90,7 @@ static void battery_thread(void *p1, void *p2, void *p3)
 
 void battery_init(void)
 {
-	adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
+	adc_dev = DEVICE_DT_GET(DT_ALIAS(battery_adc));
 	if (!device_is_ready(adc_dev)) {
 		LOG_WRN("ADC not ready — battery monitoring disabled");
 		adc_dev = NULL;

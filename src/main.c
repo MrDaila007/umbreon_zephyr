@@ -14,6 +14,8 @@
 #include <zephyr/drivers/uart.h>
 #endif
 
+#include <app/app_version.h>
+
 #include "settings.h"
 #include "car.h"
 #include "tachometer.h"
@@ -27,9 +29,7 @@
 #include "encoder.h"
 #include "display.h"
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
-#define FW_VERSION "2.0.0"
+LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 /* ─── Watchdog ──────────────────────────────────────────────────────────────── */
 #include <zephyr/drivers/watchdog.h>
@@ -39,7 +39,7 @@ static int wdt_channel_id;
 
 static void wdt_init(void)
 {
-	wdt_dev = DEVICE_DT_GET(DT_NODELABEL(wdt0));
+	wdt_dev = DEVICE_DT_GET(DT_ALIAS(app_watchdog));
 	if (!device_is_ready(wdt_dev)) {
 		LOG_WRN("Watchdog not available");
 		wdt_dev = NULL;
@@ -123,7 +123,7 @@ int main(void)
 
 	printk("\n");
 	printk("==============================\n");
-	printk("  Umbreon Zephyr v%s\n", FW_VERSION);
+	printk("  Umbreon Zephyr v%s\n", APP_VERSION_STRING);
 	printk("==============================\n");
 
 	/* Load saved settings (falls back to compile-time defaults) */
@@ -150,7 +150,7 @@ int main(void)
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */
 	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s\n",
-			sensors_online_count(), FW_VERSION);
+			sensors_online_count(), APP_VERSION_STRING);
 
 	/* ESC calibration on first boot */
 	wdt_feed_kick();

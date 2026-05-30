@@ -9,7 +9,7 @@
 Proxmox VE (хост)
   └── LXC контейнер (Ubuntu 24.04)
         ├── GitHub Actions Runner (systemd)
-        ├── Zephyr SDK 0.17 + workspace v4.3
+        ├── Zephyr SDK 1.0 + workspace v4.4
         ├── ESP8266 RTOS SDK + Xtensa (umbreon_esp_web)
         ├── OpenOCD
         └── USB ──► ST-Link ──► SWD ──► Pico 2   (опционально, HIL)
@@ -150,10 +150,10 @@ make install
 
 ```bash
 # SDK
-wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
-tar xf zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz -C /opt/
-rm zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz
-cd /opt/zephyr-sdk-0.17.0 && ./setup.sh -t arm-zephyr-eabi -c
+wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v1.0.1/zephyr-sdk-1.0.1_linux-x86_64_minimal.tar.xz
+tar xf zephyr-sdk-1.0.1_linux-x86_64_minimal.tar.xz -C /opt/
+rm zephyr-sdk-1.0.1_linux-x86_64_minimal.tar.xz
+cd /opt/zephyr-sdk-1.0.1 && ./setup.sh -t arm-zephyr-eabi -c
 
 # Workspace (от имени пользователя runner, см. ниже)
 ```
@@ -213,7 +213,7 @@ journalctl -u actions.runner.* -f
 
 На Ubuntu/Debian Python помечен как *externally managed* ([PEP 668](https://peps.python.org/pep-0668/)): `pip install` и `pip install --user` в системный интерпретатор запрещены. Нужен venv (или отдельный инструмент вроде `pipx install west`).
 
-`west init` требует пустой каталог, поэтому сначала ставим `west` во временный venv, инициализируем workspace, затем создаём постоянный `.venv` внутри `~/zephyrproject` для сборок и зависимостей Zephyr.
+`west init` требует пустой каталог, поэтому сначала ставим `west` во временный venv, инициализируем workspace, затем создаём постоянный `.venv` внутри `~/zephyrproject-v4.4` для сборок и зависимостей Zephyr.
 
 ```bash
 su - runner
@@ -221,8 +221,8 @@ su - runner
 python3 -m venv ~/.zephyr-west-bootstrap
 source ~/.zephyr-west-bootstrap/bin/activate
 pip install west
-west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0 ~/zephyrproject
-cd ~/zephyrproject
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 ~/zephyrproject-v4.4
+cd ~/zephyrproject-v4.4
 west update --narrow -o=--depth=1
 deactivate
 
@@ -273,7 +273,7 @@ cd ~/path/to/umbreon_esp_web && make all
 #### Один раннер на Zephyr и ESP8266
 
 - **Runner уровня организации** — один и тот же runner обслуживает все репозитории org (удобнее всего).
-- **Два репозитория, два repo-level runner’а** — на **той же виртуалке** можно поставить **второй** агент (отдельная папка, отдельная регистрация, второй systemd unit). Оба используют один и тот же `$HOME` (`~/zephyrproject`, `~/ESP8266_RTOS_SDK`).
+- **Два репозитория, два repo-level runner’а** — на **той же виртуалке** можно поставить **второй** агент (отдельная папка, отдельная регистрация, второй systemd unit). Оба используют один и тот же `$HOME` (`~/zephyrproject-v4.4`, `~/ESP8266_RTOS_SDK`).
 
 ##### Второй runner на той же VM (пример: `umbreon_esp_web`)
 
@@ -314,7 +314,7 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
 
 ## Часть 4: Workflow для self-hosted runner
 
-- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject` (§3.5).
+- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject-v4.4` (§3.5).
 - **umbreon_esp_web:** [`umbreon_esp_web/.github/workflows/build.yml`](../../umbreon_esp_web/.github/workflows/build.yml) — тот же `runs-on`, `~/ESP8266_RTOS_SDK` (§3.6).
 - **Umbreon_roborace:** [`Umbreon_roborace/.github/workflows/ci.yml`](../../Umbreon_roborace/.github/workflows/ci.yml) — Arduino/Python/Docker; см. [`Umbreon_roborace/docs/self-hosted-ci.md`](../../Umbreon_roborace/docs/self-hosted-ci.md).
 - **Резервная копия облачного Zephyr CI:** [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml).
@@ -336,7 +336,7 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
         run: |
           openocd -f interface/stlink.cfg -f target/rp2350.cfg \
             -c "adapter speed 5000" \
-            -c "program ${HOME}/zephyrproject/build/zephyr/zephyr.elf verify reset exit"
+            -c "program /zephyrproject-v4.4/build/zephyr/zephyr.elf verify reset exit"
 
       - name: Smoke test (UART)
         run: |
@@ -413,7 +413,7 @@ crontab -e
 
 ```bash
 su - runner
-cd ~/zephyrproject
+cd ~/zephyrproject-v4.4
 source .venv/bin/activate
 west update
 pip install -r zephyr/scripts/requirements.txt
@@ -427,7 +427,7 @@ pip install -r zephyr/scripts/requirements.txt
 
 - [ ] Контейнер запущен: `pct status 200`
 - [ ] Runner online: GitHub → Settings → Actions → Runners (зелёный кружок)
-- [ ] Zephyr: `~/zephyrproject/.venv`, `west --version`, сборка `umbreon_zephyr` проходит в Actions
+- [ ] Zephyr: `~/zephyrproject-v4.4/.venv`, `west --version`, сборка `umbreon_zephyr` проходит в Actions
 - [ ] ESP8266: `~/ESP8266_RTOS_SDK`, после `export.sh` — `make all` в клоне `umbreon_esp_web`
 - [ ] (Опционально HIL) ST-Link: `lsusb | grep 0483` внутри контейнера
 - [ ] (Опционально HIL) OpenOCD: `openocd -f interface/stlink.cfg -f target/rp2350.cfg -c "init; exit"`

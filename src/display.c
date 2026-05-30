@@ -28,7 +28,10 @@
 #include <stdio.h>
 #include <string.h>
 
-LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(display, CONFIG_APP_LOG_LEVEL);
+
+#define OLED_NODE     DT_ALIAS(oled_display)
+#define OLED_I2C_ADDR DT_REG_ADDR(OLED_NODE)
 
 /* ─── Thread config ──────────────────────────────────────────────────────── */
 #define DISPLAY_STACK_SIZE   2048
@@ -803,23 +806,23 @@ static void display_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	/* I2C0 raw diagnostics */
-	const struct device *i2c0 = DEVICE_DT_GET(DT_NODELABEL(i2c0));
-	if (device_is_ready(i2c0)) {
+	/* OLED I2C raw diagnostics */
+	const struct device *display_i2c = DEVICE_DT_GET(DT_ALIAS(display_i2c));
+	if (device_is_ready(display_i2c)) {
 		/* Try raw I2C command to SSD1306: display off */
 		uint8_t cmd_off[] = {0x00, 0xAE};
-		int rc = i2c_write(i2c0, cmd_off, sizeof(cmd_off), 0x3C);
-		wifi_cmd_printf("$L:I2C0 raw write to 0x3C: rc=%d\n", rc);
+		int rc = i2c_write(display_i2c, cmd_off, sizeof(cmd_off), OLED_I2C_ADDR);
+		wifi_cmd_printf("$L:OLED I2C raw write to 0x%x: rc=%d\n", OLED_I2C_ADDR, rc);
 
 		/* Try display on */
 		uint8_t cmd_on[] = {0x00, 0xAF};
-		rc = i2c_write(i2c0, cmd_on, sizeof(cmd_on), 0x3C);
-		wifi_cmd_printf("$L:I2C0 display-on cmd: rc=%d\n", rc);
+		rc = i2c_write(display_i2c, cmd_on, sizeof(cmd_on), OLED_I2C_ADDR);
+		wifi_cmd_printf("$L:OLED I2C display-on cmd: rc=%d\n", rc);
 	} else {
-		wifi_cmd_printf("$L:I2C0 bus not ready!\n");
+		wifi_cmd_printf("$L:OLED I2C bus not ready!\n");
 	}
 
-	oled_dev = DEVICE_DT_GET(DT_NODELABEL(ssd1306));
+	oled_dev = DEVICE_DT_GET(DT_ALIAS(oled_display));
 	wifi_cmd_printf("$L:OLED device_is_ready=%d\n", device_is_ready(oled_dev));
 	if (!device_is_ready(oled_dev)) {
 		LOG_ERR("SSD1306 not ready");
@@ -845,7 +848,7 @@ static void display_thread(void *p1, void *p2, void *p3)
 			0xA6,        /* normal display */
 			0xAF,        /* display ON */
 		};
-		int rc2 = i2c_write(i2c0, init_cmds, sizeof(init_cmds), 0x3C);
+			int rc2 = i2c_write(display_i2c, init_cmds, sizeof(init_cmds), OLED_I2C_ADDR);
 		wifi_cmd_printf("$L:Manual init: rc=%d\n", rc2);
 		if (rc2 == 0) {
 			wifi_cmd_printf("$L:Display should be ON now (manual)\n");
