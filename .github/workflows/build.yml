@@ -9,6 +9,7 @@ on:
 env:
   ZEPHYR_SDK_VERSION: "1.0.0"
   ZEPHYR_SDK_INSTALL_DIR: /opt/zephyr-sdk-1.0.0
+  U8G2_REVISION: cbceaa1cab22ad63e41c2df684e173cd5433766e
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -27,6 +28,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fetch u8g2 font sources
+        uses: actions/checkout@v4
+        with:
+          repository: olikraus/u8g2
+          ref: ${{ env.U8G2_REVISION }}
+          path: modules/u8g2
 
       - name: Install Pillow
         run: python3 -m pip install --quiet pillow
