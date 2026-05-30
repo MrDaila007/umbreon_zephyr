@@ -2,13 +2,13 @@
 
 ## Setup
 - Full setup: `make setup` (runs `setup_zephyr.sh`)
-- Manual setup: See README for Zephyr SDK v4.3 and Python venv
+- Manual setup: See README for Zephyr SDK 1.0 and Zephyr v4.4 Python venv
 
 ## Build
 - Standard (UART0 console): `make build`
 - USB console: `make build-usb`
 - HIL (no sensors): `make build-hil`
-- Manual west build: `cd ~/zephyrproject-v4.3 && source .venv/bin/activate && west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr`
+- Manual west build: `cd ~/zephyrproject-v4.4 && source .venv/bin/activate && west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr`
 
 ## Flash
 - UF2 (BOOTSEL): `make flash`
@@ -33,8 +33,8 @@
 - Dashboard connects to: 127.0.0.1:8023 (real) or 127.0.0.1:8123 (sim)
 
 ## Notes
-- Zephyr dir: `~/zephyrproject-v4.3` (adjust in Makefile if needed)
-- SDK dir: `~/SDK/zephyr-sdk-0.17.0` (adjust in Makefile if needed)
+- Zephyr dir: `~/zephyrproject-v4.4` (adjust in Makefile if needed)
+- SDK dir: `~/zephyr-sdk-1.0.0` (adjust in setup_zephyr.sh if needed)
 - Build dir: `$(ZEPHYR_DIR)/build` (configurable via Makefile)
 - WiFi protocol: UART1 (GP4/GP5) with ESP8266, ASCII commands prefixed with `$`
 - Source layout: `src/` contains main.c, car.c, sensors.c, imu.c, etc.

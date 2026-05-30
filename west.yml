@@ -1,0 +1,19 @@
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: olikraus
+      url-base: https://github.com/olikraus
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.4.0
+      import: true
+    - name: u8g2
+      remote: olikraus
+      revision: cbceaa1cab22ad63e41c2df684e173cd5433766e
+      path: app/modules/u8g2
+
+  self:
+    path: app

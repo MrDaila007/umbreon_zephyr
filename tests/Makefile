@@ -33,9 +33,10 @@ test-host: test_unit test_maneuver
 # ── Zephyr ztest (native_sim) ────────────────────────────────────────────────
 test-ztest:
 	@echo "══ Zephyr ztest ($(ZTEST_BOARD)) ══"
+	@rm -rf $(ZTEST_BUILD)
 	@. $(ZEPHYR_VENV) && \
 		ZEPHYR_BASE=$(ZEPHYR_BASE) \
-		west build -b $(ZTEST_BOARD) -d $(ZTEST_BUILD) $(ZTEST_SRC) 2>&1 | tail -3
+		west build -b $(ZTEST_BOARD) -d $(ZTEST_BUILD) --pristine always $(ZTEST_SRC)
 	@$(ZTEST_BUILD)/zephyr/zephyr.exe
 
 # ── Clean ─────────────────────────────────────────────────────────────────────

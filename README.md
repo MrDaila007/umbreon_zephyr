@@ -15,7 +15,7 @@ Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |
 | Battery | ADC ch0 | GP26 (18k/10k divider) |
-| OLED SSD1306 128x64 | bit-bang I2C | SDA=GP18, SCL=GP20 |
+| OLED SSD1306 128x64 | I2C0 400kHz | SDA=GP0, SCL=GP1, addr=0x3C |
 | Menu encoder | GPIO active low | CLK=GP22, DT=GP12, button=GP19 |
 
 ### Sensor Layout
@@ -51,6 +51,7 @@ This will:
 2. Download and install [Zephyr SDK 1.0](https://github.com/zephyrproject-rtos/sdk-ng) with ARM toolchain
 3. Initialize Zephyr v4.4 workspace at `~/zephyrproject-v4.4`
 4. Create Python venv and install all dependencies
+5. Clone u8g2 C sources into `modules/u8g2`
 
 Run `./setup_zephyr.sh --help` for all options.
 
@@ -85,7 +86,16 @@ cd ~/zephyrproject-v4.4
 west update --narrow -o=--depth=1
 ```
 
-#### 4. Python venv
+#### 4. u8g2 sources
+
+```bash
+git init modules/u8g2
+git -C modules/u8g2 remote add origin https://github.com/olikraus/u8g2.git
+git -C modules/u8g2 fetch --depth 1 origin cbceaa1cab22ad63e41c2df684e173cd5433766e
+git -C modules/u8g2 checkout --detach FETCH_HEAD
+```
+
+#### 5. Python venv
 
 ```bash
 python3 -m venv ~/zephyrproject-v4.4/.venv
@@ -321,7 +331,7 @@ shown in yellow. Real overlaps are red and block CI.
 | `tests.c/h` | 8 diagnostic test routines |
 | `track_learn.c/h` | Track profile recording and race replay |
 | `display.c/h` | Display thread, screen state machine (dashboard / menu) |
-| `display_hal.c/h` | u8g2 HAL — bit-bang I2C to SSD1306 |
+| `display_hal.c/h` | u8g2 HAL — Zephyr I2C0 to SSD1306 |
 | `screens/screen_dashboard.c` | Main dashboard: battery, sensor bars, IMU scale, WiFi strip |
 | `screens/screen_info.c` | Info screen: firmware version, sensor status |
 | `screens/screen_wifi.c` | WiFi status screen: mode, SSID, IP, RSSI, connection status |

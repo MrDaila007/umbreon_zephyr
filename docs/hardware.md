@@ -9,7 +9,7 @@ Only core 0 is used — Zephyr runs on the M33 target `rpi_pico2/rp2350a/m33`.
 
 | GPIO | Function | Notes |
 |------|----------|-------|
-| GP0 | I2C0 SDA | MPU-6050 IMU |
+| GP0 | I2C0 SDA | MPU-6050 IMU + SSD1306 OLED |
 | GP1 | I2C0 SCL | 400 kHz |
 | GP2 | I2C1 SDA | 6× VL53L0X ToF |
 | GP3 | I2C1 SCL | 100 kHz |
@@ -27,9 +27,9 @@ Only core 0 is used — Zephyr runs on the M33 target `rpi_pico2/rp2350a/m33`.
 | GP15 | XSHUT sensor 5 | Hard-Left |
 | GP16 | UART0 TX | Debug console |
 | GP17 | UART0 RX | Debug console |
-| GP18 | GPIO I2C SDA | SSD1306 OLED, bit-bang I2C |
+| GP18 | GPIO | Unused |
 | GP19 | GPIO | Menu encoder button, pull-up, active low |
-| GP20 | GPIO I2C SCL | SSD1306 OLED, bit-bang I2C |
+| GP20 | GPIO | Unused |
 | GP22 | GPIO | Menu encoder CLK, pull-up, active low |
 | GP26 | ADC ch0 | Battery (18 kΩ / 10 kΩ divider) |
 
@@ -75,6 +75,12 @@ Indices match the XSHUT power-on sequence and devicetree order.
 - Only gyroscope Z-axis is used (yaw rate)
 - Full-scale range: ±500°/s
 - Calibration: 200 samples at 5 ms intervals on startup
+
+## SSD1306 OLED
+
+- I2C0 at 400 kHz, address 0x3C
+- Shares the I2C0 bus with the MPU-6050
+- u8g2 owns the display directly; Zephyr display subsystem is disabled
 
 ## Servo (Steering)
 
