@@ -31,13 +31,18 @@ WIFI_LOG_DIR ?= /tmp
 SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 
 .PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
-	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui
+	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui check-ui-dashboard check-ui-screens
 
 setup:
 	./setup_zephyr.sh $(ZEPHYR_DIR)
 
-check-ui:
+check-ui: check-ui-dashboard check-ui-screens
+
+check-ui-dashboard:
 	$(PYTHON_BIN) tools/sim_dashboard.py
+
+check-ui-screens:
+	$(PYTHON_BIN) tools/sim_dashboard.py --source src/screens
 
 build:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \

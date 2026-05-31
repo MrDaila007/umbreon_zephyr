@@ -42,15 +42,17 @@ jobs:
       - name: Install Pillow
         run: python3 -m pip install --quiet pillow
 
-      - name: Check dashboard UI overlaps
-        run: python3 tools/sim_dashboard.py
+      - name: Check UI renders
+        run: make check-ui
 
       - name: Upload simulator render
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sim-dashboard
-          path: tools/sim_dashboard.png
+          name: sim-ui
+          path: |
+            tools/sim_dashboard.png
+            tools/sim_screens.png
 
   # Firmware build (RP2350) on GitHub-hosted runner
   build:

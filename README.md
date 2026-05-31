@@ -265,12 +265,19 @@ make test-ztest             # Zephyr ztest on native_sim
 
 ### Check display UI
 
-Renders the 128×64 dashboard at 4× scale using the project's own BDF font
-and checks every pixel for zone overlaps. Exits 0 if clean, 1 on real conflicts.
-Saves `tools/sim_dashboard.png` (three WiFi scenarios side-by-side).
+Renders the 128×64 dashboard at 4× scale using the project's own BDF fonts
+and checks every pixel for zone overlaps. The source-screen pass also compiles
+the real `src/screens/*.c` files against a small host stub harness, then checks
+the actual `screen_*_draw()` output for blank frames, out-of-bounds draw calls,
+and overlaps.
+
+Saves `tools/sim_dashboard.png` for the legacy dashboard scenarios and
+`tools/sim_screens.png` for the source-screen render grid.
 
 ```bash
 make check-ui               # requires: pip install pillow
+make check-ui-dashboard     # legacy dashboard scenarios only
+make check-ui-screens       # real src/screens/*.c draw functions
 ```
 
 Intentional overlaps (tick marks crossing the IMU baseline) are whitelisted and
@@ -299,7 +306,7 @@ shown in yellow. Real overlaps are red and block CI.
 | `make hil-smoke` | Safe real-hardware command/telemetry smoke test |
 | `make hil-endurance` | RUN endurance test with reboot/fault detection |
 | `make hil-motor` | Bench motor HIL test (requires lifted wheels) |
-| `make check-ui` | Run display overlap checker; saves `tools/sim_dashboard.png` |
+| `make check-ui` | Run both display UI checkers; saves `tools/sim_dashboard.png` and `tools/sim_screens.png` |
 
 ## Architecture
 

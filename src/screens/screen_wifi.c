@@ -107,7 +107,7 @@ static bool draw_qr_payload(const char *payload)
 	if (!qrcodegen_encodeText(payload, qr_temp, qr_code,
 				  qrcodegen_Ecc_LOW,
 				  qrcodegen_VERSION_MIN, QR_MAX_VERSION,
-				  qrcodegen_Mask_AUTO, true)) {
+				  qrcodegen_Mask_2, true)) {
 		return false;
 	}
 
