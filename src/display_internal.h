@@ -42,7 +42,7 @@ struct ui_state {
 	int      cal_type;            /* 0=gyro, 1=accel */
 	enum cal_phase cal_phase;
 	int64_t  cal_phase_start_ms;
-	char     cal_result[24];
+	char     cal_result[32];
 };
 
 /* ─── Display dimensions ─────────────────────────────────────────────────── */

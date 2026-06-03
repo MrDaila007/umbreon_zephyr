@@ -263,21 +263,22 @@ static void process_calibration(void)
 		if (elapsed >= 5000) {
 			st.cal_phase          = CAL_RUNNING;
 			st.cal_phase_start_ms = k_uptime_get();
-			if (st.cal_type == 0) {
-				imu_calibrate();
-				float bias = imu_get_gyro_bias();
-				snprintf(st.cal_result, sizeof(st.cal_result),
-					 "bias: %.2f deg/s", (double)bias);
-			} else {
-				float bx, by, bz;
-				imu_calibrate_accel();
-				imu_get_accel_bias(&bx, &by, &bz);
-				snprintf(st.cal_result, sizeof(st.cal_result),
-					 "%.2f %.2f %.2f", (double)bx, (double)by, (double)bz);
-			}
-			st.cal_phase          = CAL_DONE;
-			st.cal_phase_start_ms = k_uptime_get();
 		}
+	} else if (st.cal_phase == CAL_RUNNING) {
+		if (st.cal_type == 0) {
+			imu_calibrate();
+			float bias = imu_get_gyro_bias();
+			snprintf(st.cal_result, sizeof(st.cal_result),
+				 "bias: %.2f deg/s", (double)bias);
+		} else {
+			float bx, by, bz;
+			imu_calibrate_accel();
+			imu_get_accel_bias(&bx, &by, &bz);
+			snprintf(st.cal_result, sizeof(st.cal_result),
+				 "%.2f %.2f %.2f", (double)bx, (double)by, (double)bz);
+		}
+		st.cal_phase          = CAL_DONE;
+		st.cal_phase_start_ms = k_uptime_get();
 	} else if (st.cal_phase == CAL_DONE) {
 		if (elapsed >= 2000) {
 			go_back();
