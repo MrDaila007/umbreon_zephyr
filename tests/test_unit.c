@@ -928,6 +928,53 @@ TEST(test_cipher_full_cycle)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * IMU accessor logic (extracted static state + functions from imu.c)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static float _gyro_bias_test;
+static float _accel_bias_test[3];
+
+static float extracted_get_gyro_bias(void) { return _gyro_bias_test; }
+static void  extracted_get_accel_bias(float *x, float *y, float *z)
+{
+    *x = _accel_bias_test[0];
+    *y = _accel_bias_test[1];
+    *z = _accel_bias_test[2];
+}
+
+TEST(test_imu_gyro_bias_zero) {
+    _gyro_bias_test = 0.0f;
+    ASSERT_FLOAT_EQ(extracted_get_gyro_bias(), 0.0f, 1e-6f);
+}
+
+TEST(test_imu_gyro_bias_negative) {
+    _gyro_bias_test = -0.12f;
+    ASSERT_FLOAT_EQ(extracted_get_gyro_bias(), -0.12f, 1e-5f);
+}
+
+TEST(test_imu_accel_bias_zero) {
+    _accel_bias_test[0] = 0.0f;
+    _accel_bias_test[1] = 0.0f;
+    _accel_bias_test[2] = 0.0f;
+    float x, y, z;
+    extracted_get_accel_bias(&x, &y, &z);
+    ASSERT_FLOAT_EQ(x, 0.0f, 1e-6f);
+    ASSERT_FLOAT_EQ(y, 0.0f, 1e-6f);
+    ASSERT_FLOAT_EQ(z, 0.0f, 1e-6f);
+}
+
+TEST(test_imu_accel_bias_values) {
+    _accel_bias_test[0] =  0.10f;
+    _accel_bias_test[1] = -0.20f;
+    _accel_bias_test[2] =  9.81f;
+    float x, y, z;
+    extracted_get_accel_bias(&x, &y, &z);
+    ASSERT_FLOAT_EQ(x,  0.10f, 1e-5f);
+    ASSERT_FLOAT_EQ(y, -0.20f, 1e-5f);
+    ASSERT_FLOAT_EQ(z,  9.81f, 1e-4f);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Tests: parse_wifi_status_line — SSID cipher decode and IP
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -1073,6 +1120,12 @@ int main(void)
 	RUN_TEST(test_wifi_parse_ssid_cipher_roundtrip);
 	RUN_TEST(test_wifi_parse_ip);
 	RUN_TEST(test_wifi_parse_ip_zeroes);
+
+	printf("\n--- IMU accessor ---\n");
+	RUN_TEST(test_imu_gyro_bias_zero);
+	RUN_TEST(test_imu_gyro_bias_negative);
+	RUN_TEST(test_imu_accel_bias_zero);
+	RUN_TEST(test_imu_accel_bias_values);
 
 	TEST_SUMMARY();
 }
