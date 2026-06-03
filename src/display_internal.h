@@ -6,6 +6,7 @@
 
 /* ─── Screen IDs ─────────────────────────────────────────────────────────── */
 enum screen {
+	SCR_BOOT,
 	SCR_DASHBOARD,
 	SCR_MAIN_MENU,
 	SCR_SETTINGS_GROUPS,

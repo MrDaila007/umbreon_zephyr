@@ -11,6 +11,19 @@ config APP_DISPLAY_DASHBOARD_ONLY
 	  Useful for competition builds where accidental menu entry must
 	  be prevented.
 
+config APP_BOOTSCREEN
+	bool "Show OLED boot splash"
+	default y
+	help
+	  On startup, show logo and firmware version for a fixed duration
+	  before switching to the dashboard.
+
+config APP_BOOTSCREEN_DURATION_MS
+	int "Boot splash duration in milliseconds"
+	depends on APP_BOOTSCREEN
+	default 2500
+	range 500 10000
+
 menu "Thread configuration"
 
 config APP_CONTROL_STACK_SIZE
@@ -111,6 +124,30 @@ config APP_SENSOR_I2C_SCAN_INTERVAL_MS
 	int "Sensor I2C health scan interval in milliseconds"
 	range 1 60000
 	default 1000
+
+config APP_VL53_I2C_BITRATE
+	int "VL53L0X I2C1 bus bitrate in Hz"
+	range 100000 1000000
+	default 400000
+	help
+	  I2C1 clock frequency for the six VL53L0X range sensors.
+	  Use 100000 for conservative wiring, 400000 for lower RUN-loop latency.
+
+config APP_RUN_CSV_TELEMETRY_DIVIDER
+	int "RUN CSV telemetry divider"
+	range 0 1000
+	default 5
+	help
+	  Send CSV telemetry once every N control-loop ticks while RUN/manual
+	  driving is active. 0 disables periodic RUN CSV telemetry.
+
+config APP_WIFI_DEBUG_UART_MIRROR
+	bool "Mirror WiFi protocol TX to UART0 debug console"
+	default n
+	help
+	  When enabled, every wifi_cmd_send()/wifi_cmd_printf() payload is also
+	  written synchronously to UART0. This is useful for bench debugging but
+	  can add milliseconds of latency to each RUN control-loop tick.
 
 endmenu
 

@@ -21,6 +21,8 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(umbreon_zephyr)
 
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/assets)
+
 target_sources(app PRIVATE
     src/main.c
     src/car.c
@@ -35,6 +37,8 @@ target_sources(app PRIVATE
     src/encoder.c
     src/display.c
     src/display_hal.c
+    src/assets/umbreon_logo.c
+    src/screens/screen_boot.c
     src/screens/screen_dashboard.c
     src/screens/screen_menu.c
     src/screens/screen_settings.c

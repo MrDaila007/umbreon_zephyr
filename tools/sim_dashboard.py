@@ -526,6 +526,7 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
         void u8g2_DrawBox(u8g2_t *u, int x, int y, int w, int h);
         void u8g2_DrawFrame(u8g2_t *u, int x, int y, int w, int h);
         void u8g2_DrawStr(u8g2_t *u, int x, int y, const char *s);
+        void u8g2_DrawXBMP(u8g2_t *u, int x, int y, int w, int h, const uint8_t *bitmap);
         void u8g2_SendBuffer(u8g2_t *u);
     """).strip() + "\n")
 
@@ -572,6 +573,11 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             add_call("confirm_yes", 'st.confirm_msg = "Reset Defaults"; st.confirm_yes = true;', call)
         elif fn == "screen_info_draw":
             add_call(fn, "st.info_scroll = 0;", call)
+        elif fn == "screen_boot_draw":
+            add_call("boot_default", "", 'screen_boot_draw("Starting...");')
+        elif fn == "screen_calibrating_draw":
+            add_call("cal_countdown", "st.cal_type = 0; st.cal_phase = CAL_COUNTDOWN; st.cal_phase_start_ms = 0;", call)
+            add_call("cal_done", "st.cal_type = 0; st.cal_phase = CAL_DONE; snprintf(st.cal_result, sizeof(st.cal_result), \"bias: 0.12\");", call)
         elif takes_state:
             add_call(fn, "st.sel = 1; st.scroll = 0;", call)
         else:
@@ -684,6 +690,7 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             {"Start Car",ACT_START,true}, {"Stop Car",ACT_STOP,false},
             {"Save NVS",ACT_SAVE,true}, {"Load NVS",ACT_LOAD,true},
             {"Reset Defaults",ACT_RESET,true},
+            {"Gyro Cal",ACT_GYRO_CAL,false}, {"Accel Cal",ACT_ACCEL_CAL,false},
         };
         const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info", "WiFi"};
 
@@ -712,6 +719,19 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             fwrite(s, 1, strlen(s), stdout);
             putchar('\n');
         }
+        void u8g2_DrawXBMP(u8g2_t *u, int x, int y, int w, int h, const uint8_t *bitmap) {
+            /* Match u8g2_DrawHXBMP: LSB of each byte is the leftmost pixel */
+            int bw = (w + 7) / 8;
+            for (int row = 0; row < h; row++) {
+                for (int col = 0; col < w; col++) {
+                    int bi = row * bw + (col / 8);
+                    int bit = col % 8;
+                    if (bitmap[bi] & (1 << bit)) {
+                        u8g2_DrawPixel(u, x + col, y + row);
+                    }
+                }
+            }
+        }
         void u8g2_SendBuffer(u8g2_t *u) { (void)u; printf("SEND\n"); }
 
         float battery_get_voltage(void) { return 7.8f; }
@@ -722,6 +742,10 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
         bool imu_is_ok(void) { return true; }
         float imu_get_yaw_rate(void) { return 0.0f; }
         float imu_get_heading(void) { return 12.5f; }
+        void imu_calibrate(void) {}
+        void imu_calibrate_accel(void) {}
+        float imu_get_gyro_bias(void) { return 0.0f; }
+        void imu_get_accel_bias(float *x, float *y, float *z) { *x = *y = *z = 0.0f; }
         bool control_is_running(void) { return false; }
         bool control_is_monitor(void) { return false; }
         bool control_is_countdown(void) { return false; }
@@ -800,10 +824,14 @@ def run_source_harness(repo_root, screens_dir, funcs):
         harness = write_source_harness(tmp, repo_root, screens_dir, funcs)
         exe = Path(tmp) / "screen_harness"
         sources = [str(harness)] + [str(p) for p in sorted(Path(screens_dir).glob("screen_*.c"))]
+        logo_c = Path(repo_root) / "src" / "assets" / "umbreon_logo.c"
+        if logo_c.exists():
+            sources.append(str(logo_c))
         cmd = [
             "gcc", "-std=c99", "-Wall", "-Wextra",
             "-I", str(Path(tmp)),
             "-I", str(Path(repo_root) / "src"),
+            "-I", str(Path(repo_root) / "src" / "assets"),
             "-I", str(Path(screens_dir)),
             *sources,
             "-lm",

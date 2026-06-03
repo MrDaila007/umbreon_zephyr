@@ -265,6 +265,10 @@ make test-ztest             # Zephyr ztest on native_sim
 
 ### Check display UI
 
+On boot, the OLED shows a splash screen (team logo, firmware version, status) for
+2.5 seconds (`CONFIG_APP_BOOTSCREEN`, `CONFIG_APP_BOOTSCREEN_DURATION_MS`), then the
+dashboard. Disable with `CONFIG_APP_BOOTSCREEN=n` in `prj.conf`.
+
 Renders the 128×64 dashboard at 4× scale using the project's own BDF fonts
 and checks every pixel for zone overlaps. The source-screen pass also compiles
 the real `src/screens/*.c` files against a small host stub harness, then checks
@@ -339,6 +343,8 @@ shown in yellow. Real overlaps are red and block CI.
 | `track_learn.c/h` | Track profile recording and race replay |
 | `display.c/h` | Display thread, screen state machine (dashboard / menu) |
 | `display_hal.c/h` | u8g2 HAL — Zephyr I2C0 to SSD1306 |
+| `screens/screen_boot.c` | Boot splash: logo (XBM), firmware version, status line |
+| `assets/umbreon_logo.c` | Monochrome logo bitmap for boot screen |
 | `screens/screen_dashboard.c` | Main dashboard: battery, sensor bars, IMU scale, WiFi strip |
 | `screens/screen_info.c` | Info screen: firmware version, sensor status |
 | `screens/screen_wifi.c` | WiFi status screen: mode, SSID, IP, RSSI, connection status |

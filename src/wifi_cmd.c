@@ -212,6 +212,7 @@ static inline uint16_t tx_free(void)
 	return (t > h) ? (t - h - 1) : (TX_BUF_SIZE - h + t - 1);
 }
 
+#if IS_ENABLED(CONFIG_APP_WIFI_DEBUG_UART_MIRROR)
 static void debug_uart_send(const char *str)
 {
 	if (!debug_uart_dev) {
@@ -224,10 +225,13 @@ static void debug_uart_send(const char *str)
 	}
 	k_mutex_unlock(&debug_uart_tx_mutex);
 }
+#endif
 
 void wifi_cmd_send(const char *str)
 {
+#if IS_ENABLED(CONFIG_APP_WIFI_DEBUG_UART_MIRROR)
 	debug_uart_send(str);
+#endif
 
 	if (!uart_dev) {
 		return;

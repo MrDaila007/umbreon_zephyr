@@ -208,7 +208,7 @@ static void set_defaults(void)
 	cfg.coe_blocked   = 0.65f;
 	cfg.wrong_dir_deg = 120.0f;
 	cfg.race_cw       = true;
-	cfg.stuck_thresh  = 25;
+	cfg.stuck_thresh  = 8;
 	cfg.stall_thresh  = 50;
 	cfg.reverse_brake_cmd = -250;
 	cfg.reverse_drive_cmd = -380;

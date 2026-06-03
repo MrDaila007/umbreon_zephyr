@@ -6,10 +6,10 @@
 
 void wifi_cmd_init(void);
 
-/* Send a string over UART1 and debug UART0 (telemetry/responses) */
+/* Send a string over UART1. UART0 mirroring is build-time optional. */
 void wifi_cmd_send(const char *str);
 
-/* Printf-style send over UART1 and debug UART0 */
+/* Printf-style send over UART1. UART0 mirroring is build-time optional. */
 void wifi_cmd_printf(const char *fmt, ...);
 
 /* Log a message via WiFi with $L: prefix (thread-safe).

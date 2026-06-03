@@ -26,10 +26,9 @@
 #include "tests.h"
 #include "encoder.h"
 #include "display.h"
+#include "version.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
-#define FW_VERSION "2.0.0"
 
 /* ─── Watchdog ──────────────────────────────────────────────────────────────── */
 #include <zephyr/drivers/watchdog.h>

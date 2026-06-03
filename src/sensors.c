@@ -55,6 +55,31 @@ static uint8_t vl53_error_count[SENSOR_COUNT];
 
 extern void wdt_feed_kick(void);
 
+static void configure_i2c1_speed(const struct device *i2c1)
+{
+	uint32_t speed;
+	uint32_t actual_hz;
+
+	if (CONFIG_APP_VL53_I2C_BITRATE <= 100000) {
+		speed = I2C_SPEED_STANDARD;
+		actual_hz = 100000;
+	} else if (CONFIG_APP_VL53_I2C_BITRATE <= 400000) {
+		speed = I2C_SPEED_FAST;
+		actual_hz = 400000;
+	} else {
+		speed = I2C_SPEED_FAST_PLUS;
+		actual_hz = 1000000;
+	}
+
+	int rc = i2c_configure(i2c1, I2C_SPEED_SET(speed));
+	if (rc == 0) {
+		LOG_INF("I2C1 VL53 bus configured to %u Hz (requested %d Hz)",
+			actual_hz, CONFIG_APP_VL53_I2C_BITRATE);
+	} else {
+		LOG_WRN("I2C1 VL53 speed configure failed: %d", rc);
+	}
+}
+
 /* ─── Sensor nodelabel → device mapping ───────────────────────────────────── */
 #define VL53_DEV(idx, label) \
 	vl53_devs[idx] = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(label))
@@ -139,6 +164,7 @@ void sensors_init(void)
 	/* Try I2C bus recovery before initializing sensors */
 	const struct device *i2c1 = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 	if (device_is_ready(i2c1)) {
+		configure_i2c1_speed(i2c1);
 		int rc = i2c_recover_bus(i2c1);
 		if (rc == 0) {
 			LOG_INF("I2C1 bus recovery OK");

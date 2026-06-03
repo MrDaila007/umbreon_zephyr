@@ -67,6 +67,7 @@ enum run_substate {
 };
 static volatile int run_state;
 static int run_telem_div;
+static int run_csv_telem_div;
 
 /* ─── Sensor masks ───────────────────────────────────────────────────────── */
 #define MASK_SIDES   (BIT(IDX_LEFT) | BIT(IDX_RIGHT))
@@ -337,6 +338,18 @@ static void send_telemetry(int *s, int steer_val, float spd_target)
 			(double)imu_get_heading());
 }
 
+static bool should_send_run_csv(void)
+{
+	if (CONFIG_APP_RUN_CSV_TELEMETRY_DIVIDER <= 0) {
+		return false;
+	}
+	if (++run_csv_telem_div >= CONFIG_APP_RUN_CSV_TELEMETRY_DIVIDER) {
+		run_csv_telem_div = 0;
+		return true;
+	}
+	return false;
+}
+
 /* ─── Idle telemetry (when not driving) ───────────────────────────────────── */
 
 static void send_idle_telemetry(void)
@@ -417,7 +430,9 @@ static void work(const struct car_settings *c)
 	car_pid_control();
 
 	/* ── Telemetry ─────────────────────────────────────────────────────── */
-	send_telemetry(s, steer_cmd, spd);
+	if (should_send_run_csv()) {
+		send_telemetry(s, steer_cmd, spd);
+	}
 
 	/* ── RUN sub-state telemetry ───────────────────────────────────────── */
 	int cur_state;
@@ -579,7 +594,9 @@ static void control_thread(void *p1, void *p2, void *p3)
 			car_write_steer(manual_steer);
 			car_write_speed_ms(manual_speed);
 			car_pid_control();
-			send_telemetry(s, manual_steer, manual_speed);
+			if (should_send_run_csv()) {
+				send_telemetry(s, manual_steer, manual_speed);
+			}
 		} else {
 			/* Idle — still send telemetry */
 			send_idle_telemetry();
@@ -678,6 +695,7 @@ void control_cmd_start(void)
 	mnv = MNV_NONE;
 	k_mutex_unlock(&start_state_mutex);
 	run_telem_div = 0;
+	run_csv_telem_div = 0;
 	run_state = RUN_CLEAR;
 
 	/* 5-second countdown — idle telemetry flows */

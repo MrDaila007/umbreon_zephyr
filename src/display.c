@@ -31,6 +31,7 @@
 #include "screens/screen_info.h"
 #include "screens/screen_wifi.h"
 #include "screens/screen_calibrating.h"
+#include "screens/screen_boot.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -204,6 +205,7 @@ static void clamp_scroll(int *s, int *sc, int total, int visible)
 static const char *screen_name(enum screen scr)
 {
 	switch (scr) {
+	case SCR_BOOT:            return "boot";
 	case SCR_DASHBOARD:       return "dashboard";
 	case SCR_MAIN_MENU:       return "menu";
 	case SCR_SETTINGS_GROUPS: return "settings_groups";
@@ -315,6 +317,10 @@ static void run_test(int idx)
 
 static void handle_input(void)
 {
+	if (st.cur_scr == SCR_BOOT) {
+		return;
+	}
+
 	int rot = 0;
 	uint8_t events = encoder_poll(&rot);
 
@@ -342,6 +348,9 @@ static void handle_input(void)
 	}
 
 	switch (st.cur_scr) {
+	case SCR_BOOT:
+		break;
+
 	case SCR_DASHBOARD:
 #if !IS_ENABLED(CONFIG_APP_DISPLAY_DASHBOARD_ONLY)
 		if (click) go_screen(SCR_MAIN_MENU);
@@ -510,6 +519,7 @@ static void draw_current_screen(void)
 	/* Each screen module clears nothing — u8g2_ClearBuffer() was called before.
 	 * Each module calls u8g2_SendBuffer() at the end. */
 	switch (st.cur_scr) {
+	case SCR_BOOT:             screen_boot_draw("Starting...");      break;
 	case SCR_DASHBOARD:        screen_dashboard_draw();             break;
 	case SCR_MAIN_MENU:        screen_menu_draw(&st);               break;
 	case SCR_SETTINGS_GROUPS:  screen_settings_groups_draw(&st);    break;
@@ -543,7 +553,13 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 	if (display_ok) {
 		u8g2_SetPowerSave(&u8g2, 0); /* display always on at boot */
 	}
+
+#if IS_ENABLED(CONFIG_APP_BOOTSCREEN)
+	st.cur_scr = SCR_BOOT;
+	int64_t boot_t0 = k_uptime_get();
+#else
 	st.cur_scr = SCR_DASHBOARD;
+#endif
 	bool disp_on = display_ok;
 
 	LOG_INF("Display thread ready display=%d", display_ok ? 1 : 0);
@@ -552,6 +568,13 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 	while (1) {
 		bool running = car_is_running || test_is_active;
 		display_ok = display_hal_is_present();
+
+#if IS_ENABLED(CONFIG_APP_BOOTSCREEN)
+		if (st.cur_scr == SCR_BOOT &&
+		    (k_uptime_get() - boot_t0) >= CONFIG_APP_BOOTSCREEN_DURATION_MS) {
+			go_screen(SCR_DASHBOARD);
+		}
+#endif
 
 		if (running && disp_on && display_ok) {
 			/* Car started — blank and sleep display */
@@ -581,9 +604,14 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 				draw_current_screen(); /* calls u8g2_SendBuffer() */
 			}
 
-			int ms = (st.cur_scr == SCR_DASHBOARD)
-				? CONFIG_APP_DISPLAY_REFRESH_INTERVAL_MS
-				: CONFIG_APP_DISPLAY_MENU_INTERVAL_MS;
+			int ms;
+			if (st.cur_scr == SCR_BOOT) {
+				ms = 100;
+			} else if (st.cur_scr == SCR_DASHBOARD) {
+				ms = CONFIG_APP_DISPLAY_REFRESH_INTERVAL_MS;
+			} else {
+				ms = CONFIG_APP_DISPLAY_MENU_INTERVAL_MS;
+			}
 			k_msleep(ms);
 		} else {
 			int rot = 0;
