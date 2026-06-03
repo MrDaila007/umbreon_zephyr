@@ -30,6 +30,7 @@
 #include "screens/screen_confirm.h"
 #include "screens/screen_info.h"
 #include "screens/screen_wifi.h"
+#include "screens/screen_calibrating.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -142,6 +143,8 @@ const struct action_item actions[ACTION_COUNT] = {
 	{"Save NVS",       ACT_SAVE,  true},
 	{"Load NVS",       ACT_LOAD,  true},
 	{"Reset Defaults", ACT_RESET, true},
+	{"Gyro Cal",       ACT_GYRO_CAL,  false},
+	{"Accel Cal",      ACT_ACCEL_CAL, false},
 };
 
 const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info", "WiFi"};
@@ -212,6 +215,7 @@ static const char *screen_name(enum screen scr)
 	case SCR_CONFIRM:         return "confirm";
 	case SCR_INFO:            return "info";
 	case SCR_WIFI:            return "wifi";
+	case SCR_CALIBRATING:     return "calibrating";
 	default:                  return "unknown";
 	}
 }
@@ -241,12 +245,44 @@ static void go_back(void)
 	case SCR_CONFIRM:         st.cur_scr = st.prev_scr;         break;
 	case SCR_INFO:            st.cur_scr = SCR_MAIN_MENU;       break;
 	case SCR_WIFI:            st.cur_scr = SCR_MAIN_MENU;       break;
+	case SCR_CALIBRATING:     st.cur_scr = SCR_ACTIONS;        break;
 	case SCR_TEST_RUNNING:                                       break;
 	default:                  st.cur_scr = SCR_DASHBOARD;       break;
 	}
 	st.sel = 1;
 	st.scroll = 0;
 	wifi_log("DSP:back %s->%s", screen_name(prev), screen_name(st.cur_scr));
+}
+
+static void process_calibration(void)
+{
+	int64_t now     = k_uptime_get();
+	int64_t elapsed = now - st.cal_phase_start_ms;
+
+	if (st.cal_phase == CAL_COUNTDOWN) {
+		if (elapsed >= 5000) {
+			st.cal_phase          = CAL_RUNNING;
+			st.cal_phase_start_ms = k_uptime_get();
+			if (st.cal_type == 0) {
+				imu_calibrate();
+				float bias = imu_get_gyro_bias();
+				snprintf(st.cal_result, sizeof(st.cal_result),
+					 "bias: %.2f deg/s", (double)bias);
+			} else {
+				float bx, by, bz;
+				imu_calibrate_accel();
+				imu_get_accel_bias(&bx, &by, &bz);
+				snprintf(st.cal_result, sizeof(st.cal_result),
+					 "%.2f %.2f %.2f", (double)bx, (double)by, (double)bz);
+			}
+			st.cal_phase          = CAL_DONE;
+			st.cal_phase_start_ms = k_uptime_get();
+		}
+	} else if (st.cal_phase == CAL_DONE) {
+		if (elapsed >= 2000) {
+			go_back();
+		}
+	}
 }
 
 /* ─── Command dispatch ───────────────────────────────────────────────────── */
@@ -417,6 +453,13 @@ static void handle_input(void)
 					st.confirm_yes = false;
 					st.prev_scr    = SCR_ACTIONS;
 					go_screen(SCR_CONFIRM);
+				} else if (actions[ai].id == ACT_GYRO_CAL ||
+					   actions[ai].id == ACT_ACCEL_CAL) {
+					st.cal_type           = (actions[ai].id == ACT_GYRO_CAL) ? 0 : 1;
+					st.cal_phase          = CAL_COUNTDOWN;
+					st.cal_phase_start_ms = k_uptime_get();
+					st.cal_result[0]      = '\0';
+					go_screen(SCR_CALIBRATING);
 				} else {
 					exec_action(actions[ai].id);
 					go_screen(SCR_DASHBOARD);
@@ -450,6 +493,12 @@ static void handle_input(void)
 		if (dir != 0) st.wifi_scroll += dir;
 		if (click) { st.wifi_scroll = 0; go_back(); }
 		break;
+
+	case SCR_CALIBRATING:
+		if (click) {
+			go_back();
+		}
+		break;
 	}
 }
 
@@ -471,6 +520,7 @@ static void draw_current_screen(void)
 	case SCR_CONFIRM:          screen_confirm_draw(&st);            break;
 	case SCR_INFO:             screen_info_draw(&st);               break;
 	case SCR_WIFI:             screen_wifi_draw(&st);               break;
+	case SCR_CALIBRATING:      screen_calibrating_draw(&st);        break;
 	}
 }
 
@@ -521,6 +571,9 @@ static void display_thread_fn(void *p1, void *p2, void *p3)
 		}
 
 		if (!running) {
+			if (st.cur_scr == SCR_CALIBRATING) {
+				process_calibration();
+			}
 			handle_input();
 			if (display_ok) {
 				u8g2_ClearBuffer(&u8g2);
