@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-/* ─── Tachometer: optical encoder on GP13 (RISING edge interrupt) ─────────── */
+/* ─── Tachometer: Hall sensor on GP13, 2 magnets/rev (RISING edge interrupt) ── */
 
 void taho_init(void);
 

@@ -194,7 +194,7 @@ static void set_defaults(void)
 	cfg.min_point     = 60;
 	cfg.max_point     = 120;
 	cfg.neutral_point = 90;
-	cfg.encoder_holes = 68;
+	cfg.encoder_holes = 2;
 	cfg.wheel_diam_m  = 0.060f;
 	cfg.loop_ms       = 40;
 	/* Cruise targets (m/s): safe bench/track defaults, not race pace */

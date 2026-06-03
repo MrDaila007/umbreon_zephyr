@@ -1,5 +1,5 @@
 /*
- * tachometer.c — Optical encoder speed measurement
+ * tachometer.c — Hall sensor speed measurement (2 magnets/rev)
  *
  * Ported from luna_car.h: taho_interrupt(), get_speed()
  * Uses GPIO interrupt on GP13 (RISING edge) with atomic variables.
@@ -45,8 +45,8 @@ static inline uint32_t cyc_delta_us(uint32_t from_cyc, uint32_t to_cyc)
 	return (uint32_t)k_cyc_to_us_floor64(delta_cyc); /* small value — safe */
 }
 
-/* Reject EMI glitches on the optical line. 500 µs corresponds to ~6 m/s
- * (68 holes, Ø65 mm) — above realistic robot speed, safely excludes false pulses. */
+/* Reject EMI glitches. 500 µs is well below the minimum valid pulse interval
+ * (~17 ms at 6 m/s with 2 magnets, Ø65 mm) — safely excludes false pulses. */
 static inline uint32_t clamp_glitch_filter_us(uint32_t us)
 {
 	if (us < 1U) {
@@ -99,7 +99,7 @@ void taho_init(void)
 	gpio_init_callback(&tach_cb_data, tach_isr, BIT(tach_gpio.pin));
 	gpio_add_callback(tach_gpio.port, &tach_cb_data);
 
-	LOG_INF("Tachometer init (GP13, RISING edge)");
+	LOG_INF("Tachometer init (GP13, Hall sensor, 2 magnets/rev)");
 }
 
 /* ─── Speed calculation ───────────────────────────────────────────────────── */
