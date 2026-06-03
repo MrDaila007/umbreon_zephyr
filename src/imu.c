@@ -127,6 +127,9 @@ void imu_calibrate_accel(void)
 		accel_bias[0] = sum[0] / count;
 		accel_bias[1] = sum[1] / count;
 		accel_bias[2] = sum[2] / count;
+	} else {
+		LOG_WRN("IMU: accel cal failed — no samples, bias unchanged");
+		return;
 	}
 
 	LOG_INF("IMU: accel bias = (%.3f, %.3f, %.3f) m/s² (%d samples)",
