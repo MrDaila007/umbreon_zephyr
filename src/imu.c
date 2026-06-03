@@ -95,6 +95,8 @@ void imu_calibrate(void)
 	LOG_INF("IMU: bias = %.3f deg/s (%d samples)", (double)gyro_bias, count);
 }
 
+/* Measures average accel XYZ and stores to accel_bias[]. Currently informational
+ * only — the bias is not applied in imu_update() since accel is not used in control. */
 void imu_calibrate_accel(void)
 {
 	if (!mpu_ok) {
