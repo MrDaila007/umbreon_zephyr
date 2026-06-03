@@ -277,9 +277,11 @@ static uint8_t i2c_scan_mask_raw(void)
 		}
 	}
 
-	if (i2c_write_read(i2c1, VL53L0X_DEFAULT_ADDR, &reg, 1,
-			   id, sizeof(id)) == 0) {
-		mask |= BIT(6);
+	if (IS_ENABLED(CONFIG_APP_SENSOR_I2C_SCAN_DEFAULT_ADDR)) {
+		if (i2c_write_read(i2c1, VL53L0X_DEFAULT_ADDR, &reg, 1,
+				   id, sizeof(id)) == 0) {
+			mask |= BIT(6);
+		}
 	}
 
 	return mask;
@@ -289,6 +291,10 @@ static void check_i2c_health(void)
 {
 	int64_t now = k_uptime_get();
 
+	if (CONFIG_APP_SENSOR_I2C_SCAN_INTERVAL_MS <= 0) {
+		return;
+	}
+
 	if (now - last_i2c_scan_ms < CONFIG_APP_SENSOR_I2C_SCAN_INTERVAL_MS) {
 		return;
 	}
@@ -296,7 +302,8 @@ static void check_i2c_health(void)
 
 	uint8_t mask = i2c_scan_mask_raw();
 	if ((mask & VL53L0X_EXPECTED_MASK) != VL53L0X_EXPECTED_MASK ||
-	    (mask & BIT(6)) != 0) {
+	    (IS_ENABLED(CONFIG_APP_SENSOR_I2C_SCAN_DEFAULT_ADDR) &&
+	     (mask & BIT(6)) != 0)) {
 		LOG_WRN("VL53L0X I2C recovery requested: mask=0x%02x", mask);
 		recovery_requested = true;
 	}

@@ -20,7 +20,9 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/printk.h>
 #include <math.h>
+#include <string.h>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -68,6 +70,88 @@ enum run_substate {
 static volatile int run_state;
 static int run_telem_div;
 static int run_csv_telem_div;
+
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+struct run_prof_accum {
+	uint32_t count;
+	uint32_t total_max_us;
+	uint64_t total_us;
+	uint64_t sensors_us;
+	uint64_t recover_us;
+	uint64_t imu_us;
+	uint64_t logic_us;
+	uint64_t act_us;
+	uint64_t telemetry_us;
+	uint64_t state_us;
+	uint64_t stuck_us;
+};
+
+static struct run_prof_accum run_prof;
+
+static inline uint32_t prof_now_cyc(void)
+{
+	return k_cycle_get_32();
+}
+
+static inline uint32_t prof_elapsed_us(uint32_t start_cyc, uint32_t end_cyc)
+{
+	return (uint32_t)k_cyc_to_us_floor64(end_cyc - start_cyc);
+}
+
+static void run_prof_add(uint32_t total_us, uint32_t sensors_us,
+			 uint32_t recover_us, uint32_t imu_us,
+			 uint32_t logic_us, uint32_t act_us,
+			 uint32_t telemetry_us, uint32_t state_us,
+			 uint32_t stuck_us)
+{
+	run_prof.count++;
+	run_prof.total_us += total_us;
+	run_prof.sensors_us += sensors_us;
+	run_prof.recover_us += recover_us;
+	run_prof.imu_us += imu_us;
+	run_prof.logic_us += logic_us;
+	run_prof.act_us += act_us;
+	run_prof.telemetry_us += telemetry_us;
+	run_prof.state_us += state_us;
+	run_prof.stuck_us += stuck_us;
+	run_prof.total_max_us = MAX(run_prof.total_max_us, total_us);
+
+	if (run_prof.count < CONFIG_APP_RUN_PROFILING_INTERVAL) {
+		return;
+	}
+
+	uint32_t n = run_prof.count;
+	wifi_cmd_printf("$T:RUNPROF,n=%u,total=%u,max=%u,sens=%u,rec=%u,imu=%u,"
+			"logic=%u,act=%u,tel=%u,state=%u,stuck=%u\n",
+			n,
+			(uint32_t)(run_prof.total_us / n),
+			run_prof.total_max_us,
+			(uint32_t)(run_prof.sensors_us / n),
+			(uint32_t)(run_prof.recover_us / n),
+			(uint32_t)(run_prof.imu_us / n),
+			(uint32_t)(run_prof.logic_us / n),
+			(uint32_t)(run_prof.act_us / n),
+			(uint32_t)(run_prof.telemetry_us / n),
+			(uint32_t)(run_prof.state_us / n),
+			(uint32_t)(run_prof.stuck_us / n));
+	if (IS_ENABLED(CONFIG_APP_RUN_PROFILING_CONSOLE)) {
+		printk("$T:RUNPROF,n=%u,total=%u,max=%u,sens=%u,rec=%u,imu=%u,"
+		       "logic=%u,act=%u,tel=%u,state=%u,stuck=%u\n",
+		       n,
+		       (uint32_t)(run_prof.total_us / n),
+		       run_prof.total_max_us,
+		       (uint32_t)(run_prof.sensors_us / n),
+		       (uint32_t)(run_prof.recover_us / n),
+		       (uint32_t)(run_prof.imu_us / n),
+		       (uint32_t)(run_prof.logic_us / n),
+		       (uint32_t)(run_prof.act_us / n),
+		       (uint32_t)(run_prof.telemetry_us / n),
+		       (uint32_t)(run_prof.state_us / n),
+		       (uint32_t)(run_prof.stuck_us / n));
+	}
+	memset(&run_prof, 0, sizeof(run_prof));
+}
+#endif
 
 /* ─── Sensor masks ───────────────────────────────────────────────────────── */
 #define MASK_SIDES   (BIT(IDX_LEFT) | BIT(IDX_RIGHT))
@@ -200,6 +284,15 @@ static void maneuver_start_long(const struct car_settings *c)
 	mnv = MNV_LONG_WAIT_STOP;
 }
 
+static float control_taho_get_speed(void)
+{
+	if (IS_ENABLED(CONFIG_APP_CONTROL_INSTANT_TACHOMETER)) {
+		return taho_get_instant_speed();
+	}
+
+	return taho_get_speed();
+}
+
 /* ── One tick of the maneuver state machine ─────────────────────────────── */
 
 static void maneuver_tick(const struct car_settings *c)
@@ -211,7 +304,7 @@ static void maneuver_tick(const struct car_settings *c)
 	/* ── stuck-escape phases ──────────────────────────────────────── */
 
 	case MNV_BACK_WAIT_STOP:
-		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
+		if (control_taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_steer(mnv_steer);
 			car_write_speed(c->reverse_brake_cmd);
 			mnv_deadline = now + c->reverse_brake_ms;
@@ -275,7 +368,7 @@ static void maneuver_tick(const struct car_settings *c)
 	/* ── wrong-direction phases ───────────────────────────────────── */
 
 	case MNV_LONG_WAIT_STOP:
-		if (taho_get_speed() < 0.1f || now >= mnv_deadline) {
+		if (control_taho_get_speed() < 0.1f || now >= mnv_deadline) {
 			car_write_speed(c->reverse_brake_cmd);
 			mnv_deadline = now + c->long_reverse_brake_ms;
 			mnv = MNV_LONG_BRAKE;
@@ -391,19 +484,74 @@ static bool recover_sensors_while_stopped(void)
 
 static void work(const struct car_settings *c)
 {
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	uint32_t prof_total_start = prof_now_cyc();
+	uint32_t prof_mark;
+	uint32_t prof_sensors_us = 0;
+	uint32_t prof_recover_us = 0;
+	uint32_t prof_imu_us = 0;
+	uint32_t prof_logic_us = 0;
+	uint32_t prof_act_us = 0;
+	uint32_t prof_telemetry_us = 0;
+	uint32_t prof_state_us = 0;
+	uint32_t prof_stuck_us = 0;
+#define RUN_PROF_FLUSH()							\
+	do {									\
+		uint32_t prof_total_end = prof_now_cyc();			\
+		run_prof_add(prof_elapsed_us(prof_total_start,		\
+					     prof_total_end),		\
+			     prof_sensors_us, prof_recover_us,		\
+			     prof_imu_us, prof_logic_us, prof_act_us,	\
+			     prof_telemetry_us, prof_state_us,		\
+			     prof_stuck_us);				\
+	} while (0)
+#else
+#define RUN_PROF_FLUSH() do { } while (0)
+#endif
+
 	/* Maneuver in progress — advance state machine, skip normal logic */
 	if (mnv != MNV_NONE) {
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_mark = prof_now_cyc();
+#endif
 		imu_update();
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_imu_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+		prof_mark = prof_now_cyc();
+#endif
 		maneuver_tick(c);
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_logic_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+		RUN_PROF_FLUSH();
 		return;
 	}
 
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_mark = prof_now_cyc();
+#endif
 	int *s = sensors_poll();
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_sensors_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 	if (sensors_recovery_needed()) {
 		(void)recover_sensors_while_stopped();
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_recover_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+		RUN_PROF_FLUSH();
 		return;
 	}
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_recover_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 	imu_update();
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_imu_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 
 	/* ── Steering ──────────────────────────────────────────────────────── */
 	bool f_l = s[IDX_FRONT_LEFT]  < c->front_obstacle_dist;
@@ -423,16 +571,28 @@ static void work(const struct car_settings *c)
 	}
 
 	int steer_cmd = clamp_steer_cmd((int)(diff * coef));
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_logic_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 
 	/* ── Actuation ─────────────────────────────────────────────────────── */
 	car_write_steer(steer_cmd);
 	car_write_speed_ms(spd);
 	car_pid_control();
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_act_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 
 	/* ── Telemetry ─────────────────────────────────────────────────────── */
 	if (should_send_run_csv()) {
 		send_telemetry(s, steer_cmd, spd);
 	}
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_telemetry_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 
 	/* ── RUN sub-state telemetry ───────────────────────────────────────── */
 	int cur_state;
@@ -452,11 +612,15 @@ static void work(const struct car_settings *c)
 		send_run_state(cur_state, stuck_time, turns,
 			       how_clear, steer_cmd);
 	}
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_state_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+	prof_mark = prof_now_cyc();
+#endif
 
 	/* ── Stuck detection ───────────────────────────────────────────────── */
 	bool c_fl = s[IDX_FRONT_LEFT]  < c->close_front_dist;
 	bool c_fr = s[IDX_FRONT_RIGHT] < c->close_front_dist;
-	bool low_speed = taho_get_speed() < 0.1f;
+	bool low_speed = control_taho_get_speed() < 0.1f;
 	bool blocked = c_fl || c_fr;
 
 	/* Path 1: sensor-confirmed wall hit — fast trigger.
@@ -469,6 +633,10 @@ static void work(const struct car_settings *c)
 	}
 	if (stuck_time > c->stuck_thresh) {
 		maneuver_start_back(c);
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_stuck_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+		RUN_PROF_FLUSH();
 		return;
 	}
 
@@ -481,6 +649,10 @@ static void work(const struct car_settings *c)
 	if (stall_time > c->stall_thresh) {
 		stall_time = 0;
 		maneuver_start_back(c);
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_stuck_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+		RUN_PROF_FLUSH();
 		return;
 	}
 
@@ -499,8 +671,17 @@ static void work(const struct car_settings *c)
 
 	if (wrong_way) {
 		maneuver_start_long(c);
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+		prof_stuck_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+		RUN_PROF_FLUSH();
 		return;
 	}
+#if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
+	prof_stuck_us = prof_elapsed_us(prof_mark, prof_now_cyc());
+#endif
+	RUN_PROF_FLUSH();
+#undef RUN_PROF_FLUSH
 }
 
 /* ─── work_monitor() — diagnostic mode: sensors + servo, no motor ─────────── */

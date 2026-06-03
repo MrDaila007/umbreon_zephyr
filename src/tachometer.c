@@ -103,7 +103,6 @@ void taho_init(void)
 }
 
 /* ─── Speed calculation ───────────────────────────────────────────────────── */
-/* Port of get_speed() from luna_car.h:81-87 */
 
 float taho_get_speed(void)
 {
@@ -144,6 +143,26 @@ float taho_get_speed(void)
 out:
 	k_mutex_unlock(&taho_speed_mutex);
 	return speed;
+}
+
+/* Port of old get_speed(): derive speed from the latest pulse interval.
+ * This is intentionally lock-free for use in timing-sensitive control checks. */
+float taho_get_instant_speed(void)
+{
+	struct car_settings c;
+	settings_get_copy(&c);
+
+	uint32_t now_cyc = k_cycle_get_32();
+	uint32_t last_cyc = (uint32_t)atomic_get(&taho_last_cyc);
+	uint32_t interval_us = (uint32_t)atomic_get(&taho_interval);
+	uint32_t elapsed_us = cyc_delta_us(last_cyc, now_cyc);
+
+	if (interval_us == 0U || elapsed_us > 500000U || c.encoder_holes <= 0) {
+		return 0.0f;
+	}
+
+	return ((float)M_PI * c.wheel_diam_m * 1000000.0f) /
+	       ((float)c.encoder_holes * (float)interval_us);
 }
 
 uint32_t taho_get_count(void)

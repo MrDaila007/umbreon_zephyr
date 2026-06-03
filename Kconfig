@@ -122,8 +122,22 @@ config APP_BATTERY_SAMPLE_INTERVAL_MS
 
 config APP_SENSOR_I2C_SCAN_INTERVAL_MS
 	int "Sensor I2C health scan interval in milliseconds"
-	range 1 60000
-	default 1000
+	range 0 60000
+	default 0
+	help
+	  Interval for explicit VL53L0X I2C address scans. 0 disables the scan.
+	  Normal RUN sensor polling still detects stale/erroring sensors; this
+	  scan is mainly a bench diagnostic and can create I2C NACK log noise if
+	  it probes absent addresses.
+
+config APP_SENSOR_I2C_SCAN_DEFAULT_ADDR
+	bool "Probe VL53L0X default address during I2C health scan"
+	depends on APP_SENSOR_I2C_SCAN_INTERVAL_MS > 0
+	default n
+	help
+	  Probe address 0x29 during the explicit health scan. In normal runtime
+	  all six VL53L0X devices are moved to 0x30..0x35, so probing 0x29 will
+	  usually NACK and may add avoidable I2C latency/log noise.
 
 config APP_VL53_I2C_BITRATE
 	int "VL53L0X I2C1 bus bitrate in Hz"
@@ -131,7 +145,8 @@ config APP_VL53_I2C_BITRATE
 	default 400000
 	help
 	  I2C1 clock frequency for the six VL53L0X range sensors.
-	  Use 100000 for conservative wiring, 400000 for lower RUN-loop latency.
+	  Use 100000 for conservative wiring and fewer NACK/abort events.
+	  Use 400000 for lower RUN-loop latency only when wiring is stable.
 
 config APP_RUN_CSV_TELEMETRY_DIVIDER
 	int "RUN CSV telemetry divider"
@@ -140,6 +155,44 @@ config APP_RUN_CSV_TELEMETRY_DIVIDER
 	help
 	  Send CSV telemetry once every N control-loop ticks while RUN/manual
 	  driving is active. 0 disables periodic RUN CSV telemetry.
+
+config APP_CONTROL_INSTANT_TACHOMETER
+	bool "Use instant tachometer speed in control loop"
+	default y
+	help
+	  Use the last-pulse interval speed calculation for RUN control,
+	  stuck, stall, and maneuver stop checks. This matches the older
+	  Arduino-style behavior and avoids the mutex/EMA latency of the
+	  filtered tachometer speed path. Disable to use filtered speed in
+	  control decisions.
+
+config APP_RUN_PROFILING
+	bool "Emit RUN loop timing profiler telemetry"
+	default y
+	help
+	  Emit compact timing telemetry from the autonomous RUN loop. The
+	  profiler measures the main work() sections in microseconds and
+	  reports averages plus worst total tick time every configured number
+	  of RUN ticks.
+
+config APP_RUN_PROFILING_INTERVAL
+	int "RUN profiler report interval in ticks"
+	depends on APP_RUN_PROFILING
+	range 1 1000
+	default 25
+	help
+	  Number of autonomous RUN loop ticks to aggregate before emitting one
+	  $T:RUNPROF line. With the default 40 ms loop this reports once per
+	  second.
+
+config APP_RUN_PROFILING_CONSOLE
+	bool "Mirror RUN profiler telemetry to console"
+	depends on APP_RUN_PROFILING
+	default y
+	help
+	  Also print RUN profiler lines to the Zephyr console. This is intended
+	  for bench debugging over USB/UART0; keep it disabled for race builds
+	  if console output becomes measurable.
 
 config APP_WIFI_DEBUG_UART_MIRROR
 	bool "Mirror WiFi protocol TX to UART0 debug console"

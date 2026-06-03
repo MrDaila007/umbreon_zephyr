@@ -6,8 +6,11 @@
 
 void taho_init(void);
 
-/* Get current speed in m/s (interval-based, like Arduino get_speed()) */
+/* Get current filtered speed in m/s */
 float taho_get_speed(void);
+
+/* Get current speed in m/s from the last pulse interval, like old get_speed() */
+float taho_get_instant_speed(void);
 
 /* Get raw pulse count (atomic) */
 uint32_t taho_get_count(void);
