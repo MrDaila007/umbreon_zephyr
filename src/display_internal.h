@@ -17,7 +17,11 @@ enum screen {
 	SCR_CONFIRM,
 	SCR_INFO,
 	SCR_WIFI,
+	SCR_CALIBRATING,
 };
+
+/* ─── Calibration phases ─────────────────────────────────────────────────── */
+enum cal_phase { CAL_COUNTDOWN = 0, CAL_RUNNING = 1, CAL_DONE = 2 };
 
 /* ─── Navigation state (owned by display.c, read-only for screen modules) ── */
 struct ui_state {
@@ -34,6 +38,11 @@ struct ui_state {
 	const char *confirm_msg;
 	int info_scroll;
 	int wifi_scroll;
+	/* Calibration screen state */
+	int      cal_type;            /* 0=gyro, 1=accel */
+	enum cal_phase cal_phase;
+	int64_t  cal_phase_start_ms;
+	char     cal_result[24];
 };
 
 /* ─── Display dimensions ─────────────────────────────────────────────────── */
@@ -69,7 +78,8 @@ struct test_item {
 };
 
 /* ─── Action item ────────────────────────────────────────────────────────── */
-enum action_id { ACT_START, ACT_STOP, ACT_SAVE, ACT_LOAD, ACT_RESET };
+enum action_id { ACT_START, ACT_STOP, ACT_SAVE, ACT_LOAD, ACT_RESET,
+		 ACT_GYRO_CAL, ACT_ACCEL_CAL };
 
 struct action_item {
 	const char *label;
@@ -81,7 +91,7 @@ struct action_item {
 #define PARAM_COUNT   43
 #define GROUP_COUNT    9
 #define TEST_COUNT     8
-#define ACTION_COUNT   5
+#define ACTION_COUNT   7
 #define MAIN_REAL      5
 #define LIST_VISIBLE   5
 
