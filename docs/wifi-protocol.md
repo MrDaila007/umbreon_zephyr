@@ -146,13 +146,17 @@ $RUN:<state>,<stuck_time>,<turns>,<how_clear>,<diff>
 The robot sends status messages during startup:
 
 ```
-$BOOT:SNS=6,FW=<version>   # Sensor count and firmware version
-$BOOT:READY,UP=4200         # Boot complete, uptime in ms
+$BOOT:SNS=6,FW=<version> (<hash>),RST=POR,SUBJ=<subject>
+$BOOT:READY,UP=4200
 ```
 
-`FW` and read-only `$GET` key `FWV` both come from `src/version.h`. Use
-`make version-patch`, `make version-minor`, `make version-major`, or
-`make version-bump VERSION=x.y.z` before building visible firmware changes.
+`FW` and read-only `$GET` key `FWV` both come from `src/version.h` plus the
+current Git commit detected during the firmware build, for example
+`2.0.1 (e4c0dab)`. A trailing `*` on the hash means the firmware was built from
+a dirty worktree. `SUBJ` is the last commit subject. Run `make install-hooks`
+once to enable automatic patch bumps before each commit, or use
+`make version-patch`, `make version-minor`, `make version-major`, and
+`make version-bump VERSION=x.y.z` manually.
 
 ## Configuration Parameters
 

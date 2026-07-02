@@ -31,7 +31,7 @@ void screen_info_draw(const struct ui_state *st)
 	u8g2_SetDrawColor(&u8g2, 1);
 
 	/* Build info lines */
-	snprintf(lines[count++], 22, "FW: v%s (u8g2)", FW_VERSION);
+	snprintf(lines[count++], 22, "FW: %s", FW_VERSION_FULL);
 	snprintf(lines[count++], 22, "Core: M33 Zephyr v4.4");
 	snprintf(lines[count++], 22, "Sensors: %d/6 online", sensors_online_count());
 	snprintf(lines[count++], 22, "IMU: %s", imu_is_ok() ? "OK" : "FAIL");

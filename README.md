@@ -270,7 +270,19 @@ On boot, the OLED shows a splash screen (team logo, firmware version, status) fo
 dashboard. Disable with `CONFIG_APP_BOOTSCREEN=n` in `prj.conf`.
 
 Firmware version shown on the boot splash and Info screen comes from
-`src/version.h`. Bump it before visible UI/behavior changes:
+`src/version.h`. The built firmware appends the current Git commit, for example
+`2.0.1 (e4c0dab)`, so the car's menu shows exactly which commit is running.
+An asterisk after the hash, for example `2.0.1 (e4c0dab*)`, means the firmware
+was built from a dirty worktree.
+
+Install the repository hook once to bump the patch version automatically before
+each commit:
+
+```bash
+make install-hooks
+```
+
+Manual version controls are still available:
 
 ```bash
 make version-patch            # 2.0.0 -> 2.0.1
@@ -303,6 +315,7 @@ shown in yellow. Real overlaps are red and block CI.
 | Target | Description |
 |--------|-------------|
 | `make setup` | Run `setup_zephyr.sh` (full environment setup) |
+| `make install-hooks` | Enable the pre-commit firmware version bump hook |
 | `make build` | Build firmware (UART console) |
 | `make build-usb` | Build firmware (USB console) |
 | `make build-hil` | Build for bare HIL (IMU/VL53 disabled) |

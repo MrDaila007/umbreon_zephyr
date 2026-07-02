@@ -20,8 +20,8 @@ void screen_boot_draw(const char *status)
 	int ly = 4;
 	u8g2_DrawXBMP(&u8g2, lx, ly, UMBREON_LOGO_W, UMBREON_LOGO_H, umbreon_logo_bits);
 
-	char ver[20];
-	snprintf(ver, sizeof(ver), "v%s", FW_VERSION);
+	char ver[32];
+	snprintf(ver, sizeof(ver), "v%s", FW_VERSION_FULL);
 	u8g2_SetFont(&u8g2, u8g2_font_5x7_tr);
 	int vw = u8g2_GetStrWidth(&u8g2, ver);
 	int ver_y = ly + UMBREON_LOGO_H + 6;

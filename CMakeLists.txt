@@ -21,7 +21,47 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(umbreon_zephyr)
 
-target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/assets)
+find_package(Git QUIET)
+set(FW_GIT_HASH "unknown")
+set(FW_COMMIT_SUBJECT "unknown")
+if(Git_FOUND)
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --short=7 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE FW_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} log -1 --pretty=%s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE FW_COMMIT_SUBJECT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} diff --quiet
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE FW_GIT_DIRTY
+    ERROR_QUIET
+  )
+  if(FW_GIT_DIRTY)
+    string(APPEND FW_GIT_HASH "*")
+  endif()
+endif()
+
+string(REPLACE "\\" "\\\\" FW_COMMIT_SUBJECT "${FW_COMMIT_SUBJECT}")
+string(REPLACE "\"" "\\\"" FW_COMMIT_SUBJECT "${FW_COMMIT_SUBJECT}")
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/version_git.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/version_git.h
+  @ONLY
+)
+
+target_include_directories(app PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/assets
+  ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
 
 target_sources(app PRIVATE
     src/main.c

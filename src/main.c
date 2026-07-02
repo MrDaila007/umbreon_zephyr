@@ -122,7 +122,7 @@ int main(void)
 
 	printk("\n");
 	printk("==============================\n");
-	printk("  Umbreon Zephyr v%s\n", FW_VERSION);
+	printk("  Umbreon Zephyr v%s\n", FW_VERSION_FULL);
 	printk("==============================\n");
 
 	/* Read reset reason early; report it after WiFi is up */
@@ -160,8 +160,9 @@ int main(void)
 	else if (reset_cause & RESET_PIN)      reset_str = "PIN";
 	else if (reset_cause & RESET_POR)      reset_str = "POR";
 
-	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s,RST=%s\n",
-			sensors_online_count(), FW_VERSION, reset_str);
+	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s,RST=%s,SUBJ=%s\n",
+			sensors_online_count(), FW_VERSION_FULL, reset_str,
+			FW_COMMIT_SUBJECT);
 
 	/* ESC calibration on first boot */
 	wdt_feed_kick();

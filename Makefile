@@ -32,12 +32,16 @@ SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 VERSION_FILE ?= src/version.h
 PART         ?= patch
 
-.PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
+.PHONY: setup install-hooks build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
 	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui check-ui-dashboard check-ui-screens \
 	version-show version-bump version-patch version-minor version-major
 
 setup:
 	./setup_zephyr.sh $(ZEPHYR_DIR)
+
+install-hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
 
 version-show:
 	$(PYTHON_BIN) tools/bump_version.py --show $(VERSION_FILE)

@@ -529,7 +529,7 @@ static void cmd_get(void)
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
 		(double)c.bat_low, c.tach_glitch_filter_us,
-		SENSOR_COUNT, MAX_SENSOR_RANGE, FW_VERSION);
+		SENSOR_COUNT, MAX_SENSOR_RANGE, FW_VERSION_FULL);
 	wifi_cmd_send(out);
 	k_mutex_unlock(&cfg_get_mutex);
 }

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "${BUMP_FW_VERSION:-1}" = "0" ]; then
+	exit 0
+fi
+
+if [ ! -f src/version.h ] || [ ! -f tools/bump_version.py ]; then
+	exit 0
+fi
+
+python3 tools/bump_version.py --part patch src/version.h
+git add src/version.h
