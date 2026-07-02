@@ -25,6 +25,7 @@
 #include "display.h"
 #include "display_hal.h"
 #include "encoder.h"
+#include "version.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -507,7 +508,7 @@ static void cmd_get(void)
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
 		",TGF=%d"
-		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
+		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=%s\n",
 		c.front_obstacle_dist, c.side_open_dist,
 		c.all_close_dist, c.close_front_dist,
 		(double)c.pid_kp, (double)c.pid_ki, (double)c.pid_kd,
@@ -528,7 +529,7 @@ static void cmd_get(void)
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
 		(double)c.bat_low, c.tach_glitch_filter_us,
-		SENSOR_COUNT, MAX_SENSOR_RANGE);
+		SENSOR_COUNT, MAX_SENSOR_RANGE, FW_VERSION);
 	wifi_cmd_send(out);
 	k_mutex_unlock(&cfg_get_mutex);
 }

@@ -146,9 +146,13 @@ $RUN:<state>,<stuck_time>,<turns>,<how_clear>,<diff>
 The robot sends status messages during startup:
 
 ```
-$BOOT:SNS=6,FW=2.0.0       # Sensor count and firmware version
+$BOOT:SNS=6,FW=<version>   # Sensor count and firmware version
 $BOOT:READY,UP=4200         # Boot complete, uptime in ms
 ```
+
+`FW` and read-only `$GET` key `FWV` both come from `src/version.h`. Use
+`make version-patch`, `make version-minor`, `make version-major`, or
+`make version-bump VERSION=x.y.z` before building visible firmware changes.
 
 ## Configuration Parameters
 

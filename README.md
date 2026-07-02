@@ -269,6 +269,17 @@ On boot, the OLED shows a splash screen (team logo, firmware version, status) fo
 2.5 seconds (`CONFIG_APP_BOOTSCREEN`, `CONFIG_APP_BOOTSCREEN_DURATION_MS`), then the
 dashboard. Disable with `CONFIG_APP_BOOTSCREEN=n` in `prj.conf`.
 
+Firmware version shown on the boot splash and Info screen comes from
+`src/version.h`. Bump it before visible UI/behavior changes:
+
+```bash
+make version-patch            # 2.0.0 -> 2.0.1
+make version-minor            # 2.0.1 -> 2.1.0
+make version-major            # 2.1.0 -> 3.0.0
+make version-bump VERSION=2.2.0
+make version-show
+```
+
 Renders the 128×64 dashboard at 4× scale using the project's own BDF fonts
 and checks every pixel for zone overlaps. The source-screen pass also compiles
 the real `src/screens/*.c` files against a small host stub harness, then checks
@@ -295,6 +306,11 @@ shown in yellow. Real overlaps are red and block CI.
 | `make build` | Build firmware (UART console) |
 | `make build-usb` | Build firmware (USB console) |
 | `make build-hil` | Build for bare HIL (IMU/VL53 disabled) |
+| `make version-patch` | Bump firmware patch version in `src/version.h` |
+| `make version-minor` | Bump firmware minor version in `src/version.h` |
+| `make version-major` | Bump firmware major version in `src/version.h` |
+| `make version-bump VERSION=x.y.z` | Set an explicit firmware version |
+| `make version-show` | Print the current firmware version |
 | `make flash` | Copy UF2 to Pico 2 in BOOTSEL mode |
 | `make flash-stlink` | Flash ELF via ST-Link/OpenOCD |
 | `make monitor` | Serial console (picocom) |

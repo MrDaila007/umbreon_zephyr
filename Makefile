@@ -29,12 +29,30 @@ WIFI_DURATION ?= 300
 WIFI_START ?= 0
 WIFI_LOG_DIR ?= /tmp
 SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
+VERSION_FILE ?= src/version.h
+PART         ?= patch
 
 .PHONY: setup build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
-	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui check-ui-dashboard check-ui-screens
+	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui check-ui-dashboard check-ui-screens \
+	version-show version-bump version-patch version-minor version-major
 
 setup:
 	./setup_zephyr.sh $(ZEPHYR_DIR)
+
+version-show:
+	$(PYTHON_BIN) tools/bump_version.py --show $(VERSION_FILE)
+
+version-bump:
+	$(PYTHON_BIN) tools/bump_version.py --part $(PART) $(if $(VERSION),--set $(VERSION),) $(VERSION_FILE)
+
+version-patch:
+	$(MAKE) version-bump PART=patch
+
+version-minor:
+	$(MAKE) version-bump PART=minor
+
+version-major:
+	$(MAKE) version-bump PART=major
 
 check-ui: check-ui-dashboard check-ui-screens
 
