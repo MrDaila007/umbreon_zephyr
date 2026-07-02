@@ -24,6 +24,13 @@ config APP_BOOTSCREEN_DURATION_MS
 	default 2500
 	range 500 10000
 
+config APP_BUZZER
+	bool "Enable piezo buzzer on GP18"
+	default y
+	help
+	  Drive a small passive piezo buzzer connected to GP18 and GND.
+	  Sounds are queued and played by a low-priority thread.
+
 menu "Thread configuration"
 
 config APP_CONTROL_STACK_SIZE
@@ -85,6 +92,18 @@ config APP_ENCODER_PRIORITY
 	int "Encoder thread priority"
 	range 0 15
 	default 5
+
+config APP_BUZZER_STACK_SIZE
+	int "Buzzer thread stack size"
+	depends on APP_BUZZER
+	range 512 4096
+	default 1024
+
+config APP_BUZZER_PRIORITY
+	int "Buzzer thread priority"
+	depends on APP_BUZZER
+	range 0 15
+	default 12
 
 config APP_BATTERY_STACK_SIZE
 	int "Battery thread stack size"

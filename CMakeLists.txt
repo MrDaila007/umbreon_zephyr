@@ -73,6 +73,7 @@ target_sources(app PRIVATE
     src/control.c
     src/settings.c
     src/battery.c
+    src/buzzer.c
     src/tests.c
     src/encoder.c
     src/display.c

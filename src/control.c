@@ -14,6 +14,7 @@
 #include "imu.h"
 #include "wifi_cmd.h"
 #include "battery.h"
+#include "buzzer.h"
 #include "display.h"
 
 #include <zephyr/kernel.h>
@@ -905,6 +906,7 @@ void control_cmd_start(void)
 	}
 
 	display_notify_run_state(true);
+	buzzer_play(BUZZER_RUN_START);
 	wifi_cmd_send("$STS:RUN\n");
 }
 
@@ -937,6 +939,7 @@ void control_cmd_stop(void)
 	manual_speed = 0.0f;
 	car_write_speed(0);
 	car_write_steer(0);
+	buzzer_play(BUZZER_STOP);
 	wifi_cmd_send("$ACK\n");
 	wifi_cmd_send("$STS:STOP\n");
 }

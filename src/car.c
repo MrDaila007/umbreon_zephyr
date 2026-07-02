@@ -7,6 +7,7 @@
 #include "car.h"
 #include "settings.h"
 #include "tachometer.h"
+#include "buzzer.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -297,5 +298,6 @@ void car_run_calibration(void)
 
 	wifi_cmd_send("$T:CAL,phase=done\n");
 	wifi_cmd_send("$TDONE:cal\n");
+	buzzer_play(BUZZER_CAL_DONE);
 	LOG_INF("ESC calibration complete");
 }

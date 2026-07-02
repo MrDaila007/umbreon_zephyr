@@ -12,6 +12,7 @@
 
 ## Flash
 - UF2 (BOOTSEL): `make flash`
+- CMSIS-DAP probe/OpenOCD: `make flash-probe`
 - ST-Link/OpenOCD: `make flash-stlink`
 - Manual UF2 copy: `cp build/zephyr/zephyr.uf2 /media/$USER/RP2350/`
 
@@ -19,6 +20,32 @@
 - Default serial (ttyACM0): `make monitor`
 - UART0 console (ttyUSB0): `make monitor-uart0`
 - Override port: `make monitor-uart0 UART0_PORT=/dev/ttyUSB1`
+
+## Debug Probe
+- Hardware: Raspberry Pi Debug Probe / CMSIS-DAP connected to SWD, plus probe UART wired to target UART0 (`probe RX -> GP16`, `probe TX -> GP17`, common GND).
+- Flash current build through the probe: `make flash-probe`.
+- If OpenOCD says `unable to find a matching CMSIS-DAP device` or `libusb initialization failed`, rerun with escalated USB access.
+- Probe UART usually appears as `/dev/ttyACM0`. The firmware console/logs use UART0 at 115200 by default.
+- Read live logs:
+  ```sh
+  stty -F /dev/ttyACM0 115200 raw -echo
+  timeout 12 cat /dev/ttyACM0
+  ```
+- Reset target and capture boot logs in one command:
+  ```sh
+  openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg \
+    -c 'adapter speed 5000' \
+    -c 'init; reset run; shutdown'
+  stty -F /dev/ttyACM0 115200 raw -echo
+  timeout 12 cat /dev/ttyACM0
+  ```
+- If `/dev/ttyACM0` is missing but `lsusb` shows `2e8a:000c Raspberry Pi Debug Probe`, check CDC binding:
+  ```sh
+  lsmod | grep cdc_acm
+  find /sys/bus/usb/devices -path '*tty/ttyACM*' -print
+  ```
+- The first sandboxed read of `/dev/ttyACM0` may fail even when sysfs shows it. Use escalated access for host USB device reads.
+- Useful smoke command after flashing and boot: send `$BEEP` over UART/WiFi to verify the GP18 piezo path.
 
 ## Test
 - All tests: `make test`

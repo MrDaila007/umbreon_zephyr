@@ -26,6 +26,7 @@
 #include "display_hal.h"
 #include "encoder.h"
 #include "version.h"
+#include "buzzer.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -680,6 +681,7 @@ static void cmd_help(void)
 		"$L: $START $STOP $MONITOR $STATUS $BAT\n"
 		"$L: $DRV:<steer>,<speed> $DRVEN $DRVOFF\n"
 		"$L: $SRV:<angle> $ESC:<us>\n"
+		"$L: $BEEP or $BEEP:<freq>,<ms>\n"
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
 		"$L: --- Debug ---\n"
 		"$L: $DIAG $SNS $IMU $PID $SYS $ENC $DSP $HELP\n"
@@ -753,6 +755,18 @@ static void dispatch_command(const char *line)
 			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
+	} else if (strcmp(line, "$BEEP") == 0) {
+		buzzer_play(BUZZER_BOOT_READY);
+		wifi_cmd_send("$ACK\n");
+	} else if (strncmp(line, "$BEEP:", 6) == 0) {
+		int freq = 0;
+		int ms = 0;
+		if (sscanf(line + 6, "%d,%d", &freq, &ms) == 2) {
+			buzzer_beep(CLAMP(freq, 100, 5000), CLAMP(ms, 10, 2000));
+			wifi_cmd_send("$ACK\n");
+		} else {
+			wifi_cmd_send("$NAK:bad_beep\n");
+		}
 	} else if (strcmp(line, "$PWR") == 0) {
 		wifi_cmd_printf("$PWR:BAT=%.2f,RAW=%.2f,MIN=%.2f,ESC=%d\n",
 			(double)battery_get_voltage(),

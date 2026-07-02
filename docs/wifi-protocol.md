@@ -66,6 +66,8 @@ command arrives within that window, the motors stop automatically.
 | `$IMU` | `$IMU:yaw=...,hdg=...` | Yaw rate (°/s) and heading (°) |
 | `$PID` | `$PID:kp=...,ki=...,kd=...,spd=...` | PID state and current speed |
 | `$BAT` | `$BAT:voltage` | Battery voltage (V) |
+| `$BEEP` | `$ACK` | Play default buzzer chime |
+| `$BEEP:freq,ms` | `$ACK` | Play buzzer tone, 100-5000 Hz, 10-2000 ms |
 | `$SYS` | Multi-line | System info (uptime, firmware version, settings) |
 | `$LOG:ON` | `$ACK` | Enable debug log forwarding |
 | `$LOG:OFF` | `$ACK` | Disable debug log forwarding |

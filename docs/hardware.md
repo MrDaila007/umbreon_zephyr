@@ -27,7 +27,7 @@ Only core 0 is used — Zephyr runs on the M33 target `rpi_pico2/rp2350a/m33`.
 | GP15 | XSHUT sensor 5 | Hard-Left |
 | GP16 | UART0 TX | Debug console |
 | GP17 | UART0 RX | Debug console |
-| GP18 | GPIO | Unused |
+| GP18 | GPIO | Piezo buzzer |
 | GP19 | GPIO | Menu encoder button, pull-up, active low |
 | GP20 | GPIO | Unused |
 | GP22 | GPIO | Menu encoder CLK, pull-up, active low |
@@ -112,6 +112,12 @@ Indices match the XSHUT power-on sequence and devicetree order.
 - Resistor divider: R1 = 18 kΩ, R2 = 10 kΩ → multiplier 2.8
 - ADC: 12-bit, 3.3 V reference
 - Low-voltage cutoff: 6.0 V (configurable, 10 s sustained)
+
+## Piezo Buzzer
+
+- Connected to GP18 and GND
+- Driven as a GPIO square wave by the `buzzer` thread
+- Boot ready, RUN start, STOP, and ESC calibration completion have short sound cues
 
 ## ESP8266 WiFi Bridge
 

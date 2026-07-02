@@ -23,6 +23,7 @@
 #include "wifi_cmd.h"
 #include "control.h"
 #include "battery.h"
+#include "buzzer.h"
 #include "tests.h"
 #include "encoder.h"
 #include "display.h"
@@ -146,6 +147,7 @@ int main(void)
 	imu_calibrate();     /* ~1 sec */
 	wdt_feed_kick();
 	battery_init();
+	buzzer_init();
 	wifi_cmd_init();
 	encoder_init();
 	display_init();
@@ -178,6 +180,7 @@ int main(void)
 
 	/* Signal startup complete */
 	blink_led(3, 100);
+	buzzer_play(BUZZER_BOOT_READY);
 
 	wifi_cmd_printf("$BOOT:READY,UP=%lld\n", k_uptime_get());
 

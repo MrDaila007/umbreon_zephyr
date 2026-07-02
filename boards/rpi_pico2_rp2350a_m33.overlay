@@ -9,6 +9,7 @@
  *   PWM   GP10 (slice 5A) — Steering servo
  *   PWM   GP11 (slice 5B) — Motor ESC
  *   GPIO  GP13 — Tachometer interrupt (RISING)
+ *   GPIO  GP18 — Piezo buzzer
  *   ADC   GP26 (ch0) — Battery voltage
  *   GPIO  GP6,7,8,9,14,15 — VL53L0X XSHUT pins
  */
@@ -55,6 +56,14 @@
 		enc_sw: enc_btn {
 			gpios = <&gpio0 19 GPIO_ACTIVE_LOW>;
 			label = "Encoder Button";
+		};
+	};
+
+	buzzer {
+		compatible = "gpio-leds";
+		buzzer_pin: buzzer {
+			gpios = <&gpio0 18 GPIO_ACTIVE_HIGH>;
+			label = "Piezo buzzer";
 		};
 	};
 };

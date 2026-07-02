@@ -14,6 +14,7 @@ Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 | Servo (steering) | PWM slice 5A | GP10 |
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |
+| Piezo buzzer | GPIO square wave | GP18 |
 | Battery | ADC ch0 | GP26 (18k/10k divider) |
 | OLED SSD1306 128x64 | I2C0 400kHz | SDA=GP0, SCL=GP1, addr=0x3C |
 | Menu encoder | GPIO active low | CLK=GP22, DT=GP12, button=GP19 |
@@ -420,6 +421,7 @@ provisioning, XOR+hex cipher) is documented in
 | Command | Description |
 |---------|-------------|
 | `$BAT` | Battery voltage |
+| `$BEEP` / `$BEEP:freq,ms` | Piezo buzzer test on GP18 |
 | `$TEST:name` | Run test (lidar, servo, taho, esc, speed, autotune, **pidtune**, reactive, cal) |
 | `$DIAG` | Overall system diagnostics |
 | `$SNS` | Raw sensor readings |
