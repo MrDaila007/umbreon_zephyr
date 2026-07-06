@@ -97,6 +97,9 @@ const struct param_desc params[PARAM_COUNT] = {
 	{"RCW", "Race CW",    PT_BOOL,  1,    1,     0, 1,    P_OFF(race_cw),             1},
 	{"STK", "Stuck Thr",  PT_INT,   1,    5,     0, 1000, P_OFF(stuck_thresh),        1},
 	{"STL", "Stall Thr",  PT_INT,   1,    5,     0, 1000, P_OFF(stall_thresh),        1},
+	{"WDT", "Det Mode",   PT_INT,   1,    1,     0, 1,    P_OFF(wrong_detect_mode),   1},
+	{"WMT", "Mnv Mode",   PT_INT,   1,    1,     0, 1,    P_OFF(wrong_maneuver_mode), 1},
+	{"WST", "Sens Thr",   PT_FLOAT, 1.0f, 5.0f,-10000, 10000, P_OFF(wrong_sensor_thresh), 1},
 	/* Maneuvers */
 	{"RBC", "Rev Brk",    PT_INT,   5,   20, -1000, 0,    P_OFF(reverse_brake_cmd),   1},
 	{"RDC", "Rev Drv",    PT_INT,   5,   20, -1000, 0,    P_OFF(reverse_drive_cmd),   1},
@@ -106,6 +109,10 @@ const struct param_desc params[PARAM_COUNT] = {
 	{"LDM", "LDrv ms",    PT_INT,   10, 100,     0, 5000, P_OFF(long_reverse_drive_ms), 1},
 	{"LFS", "Long Fwd",   PT_FLOAT, 0.01f,0.05f, 0, 2.0f, P_OFF(long_forward_speed_cap), 1},
 	{"LFM", "LFwd ms",    PT_INT,   10, 100,     0, 5000, P_OFF(long_forward_ms),     1},
+	{"BSM", "Burst Stp",  PT_INT,   10, 50,      0, 5000, P_OFF(burst_stop_ms),       1},
+	{"BPS", "Burst Str",  PT_INT,   5,  20,      0, 5000, P_OFF(burst_pre_steer_ms),  1},
+	{"BFS", "Burst Spd",  PT_FLOAT, 0.1f,0.5f,  0, 5.0f, P_OFF(burst_forward_speed), 1},
+	{"BFM", "Burst ms",   PT_INT,   10, 100,     0, 5000, P_OFF(burst_forward_ms),    1},
 	/* Hardware */
 	{"IMR", "IMU Rot",    PT_BOOL,  1,    1,     0, 1,    P_OFF(imu_rotate),          1},
 	{"SVR", "Srv Rev",    PT_BOOL,  1,    1,     0, 1,    P_OFF(servo_reverse),       1},
@@ -122,9 +129,9 @@ const struct param_group groups[GROUP_COUNT] = {
 	{"Steering",   13,  3},
 	{"Tachometer", 16,  3},
 	{"Control",    19,  6},
-	{"Navigation", 25,  4},
-	{"Maneuver",   29,  8},
-	{"Hardware",   37,  6},
+	{"Navigation", 25,  7},
+	{"Maneuver",   32, 12},
+	{"Hardware",   44,  6},
 };
 
 const struct test_item tests[TEST_COUNT] = {

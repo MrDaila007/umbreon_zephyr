@@ -660,6 +660,9 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             {"RCW","Race CW",PT_BOOL,1,1,0,1,0,1},
             {"STK","Stuck Thr",PT_INT,1,5,0,1000,0,1},
             {"STL","Stall Thr",PT_INT,1,5,0,1000,0,1},
+            {"WDT","Det Mode",PT_INT,1,1,0,1,0,1},
+            {"WMT","Mnv Mode",PT_INT,1,1,0,1,0,1},
+            {"WST","Sens Thr",PT_FLOAT,1.0f,5.0f,-10000,10000,0,1},
             {"RBC","Rev Brk",PT_INT,5,20,-1000,0,0,1},
             {"RDC","Rev Drv",PT_INT,5,20,-1000,0,0,1},
             {"RBM","Brk ms",PT_INT,10,100,0,5000,0,1},
@@ -668,6 +671,10 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             {"LDM","LDrv ms",PT_INT,10,100,0,5000,0,1},
             {"LFS","Long Fwd",PT_FLOAT,0.01f,0.05f,0,2.0f,0,1},
             {"LFM","LFwd ms",PT_INT,10,100,0,5000,0,1},
+            {"BSM","Burst Stp",PT_INT,10,50,0,5000,0,1},
+            {"BPS","Burst Str",PT_INT,5,20,0,5000,0,1},
+            {"BFS","Burst Spd",PT_FLOAT,0.1f,0.5f,0,5.0f,0,1},
+            {"BFM","Burst ms",PT_INT,10,100,0,5000,0,1},
             {"IMR","IMU Rot",PT_BOOL,1,1,0,1,0,1},
             {"SVR","Srv Rev",PT_BOOL,1,1,0,1,0,1},
             {"CAL","Calibr.",PT_BOOL,1,1,0,1,0,1},
@@ -678,7 +685,7 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
         const struct param_group groups[GROUP_COUNT] = {
             {"Obstacles",0,4}, {"PID",4,3}, {"Speed/ESC",7,6},
             {"Steering",13,3}, {"Tachometer",16,3}, {"Control",19,6},
-            {"Navigation",25,4}, {"Maneuver",29,8}, {"Hardware",37,6},
+            {"Navigation",25,7}, {"Maneuver",32,12}, {"Hardware",44,6},
         };
         const struct test_item tests[TEST_COUNT] = {
             {"lidar","Lidar Scan",false}, {"servo","Servo Sweep",false},

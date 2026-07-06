@@ -45,9 +45,18 @@ struct car_settings {
 	float coe_clear;
 	float coe_blocked;
 
-	/* Navigation */
+	/* Navigation / wrong-direction */
 	float wrong_dir_deg;
 	bool race_cw;
+	/* 0=IMU yaw (WDD), 1=sensor diff×speed (WST) */
+	uint8_t wrong_detect_mode;
+	/* 0=long reverse+slow fwd (LBM/LDM/LFS), 1=short back+burst (Danila) */
+	uint8_t wrong_maneuver_mode;
+	float wrong_sensor_thresh;
+	int burst_stop_ms;
+	int burst_pre_steer_ms;
+	float burst_forward_speed;
+	int burst_forward_ms;
 	int stuck_thresh;
 	int stall_thresh;
 	int reverse_brake_cmd;
@@ -95,6 +104,11 @@ extern struct car_settings cfg;
 #define DEFAULT_SOD         600
 #define DEFAULT_ACD         400
 #define DEFAULT_CFD         200    /* 20 cm */
+
+#define WRONG_DETECT_IMU      0
+#define WRONG_DETECT_SENSOR   1
+#define WRONG_MANEUVER_LONG   0
+#define WRONG_MANEUVER_BURST  1
 
 /* ─── ESC constants ───────────────────────────────────────────────────────── */
 #define NEUTRAL_SPEED       1500  /* µs — never changes */

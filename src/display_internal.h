@@ -89,7 +89,7 @@ struct action_item {
 };
 
 /* ─── Counts (must match definitions in display.c) ──────────────────────── */
-#define PARAM_COUNT   43
+#define PARAM_COUNT   50
 #define GROUP_COUNT    9
 #define TEST_COUNT     8
 #define ACTION_COUNT   8

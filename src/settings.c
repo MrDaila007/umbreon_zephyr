@@ -27,7 +27,8 @@ LOG_MODULE_REGISTER(settings, LOG_LEVEL_INF);
 #define NVS_KEY_TRACK_DATA 3
 
 #define SETTINGS_MAGIC     0x554D4252  /* "UMBR" */
-#define SETTINGS_VERSION   12
+#define SETTINGS_VERSION   13
+#define SETTINGS_VERSION_V12 12
 #define SETTINGS_VERSION_V11 11
 #define SETTINGS_VERSION_V10 10
 
@@ -36,6 +37,62 @@ static bool nvs_ready;
 
 /* ─── NVS storage structure (packed for flash) ────────────────────────────── */
 struct __attribute__((packed)) nvs_settings {
+	uint32_t magic;
+	uint8_t  version;
+	int16_t  front_obstacle_dist;
+	int16_t  side_open_dist;
+	int16_t  all_close_dist;
+	int16_t  close_front_dist;
+	float    pid_kp;
+	float    pid_ki;
+	float    pid_kd;
+	int16_t  min_speed;
+	int16_t  max_speed;
+	int16_t  min_bspeed;
+	int8_t   min_point;
+	int8_t   max_point;
+	int8_t   neutral_point;
+	int16_t  encoder_holes;
+	float    wheel_diam_m;
+	int16_t  loop_ms;
+	float    spd_clear;
+	float    spd_blocked;
+	float    spd_slew;
+	float    kick_pct;
+	int16_t  kick_ms;
+	int16_t  corner_kick_us;
+	float    coe_clear;
+	float    coe_blocked;
+	float    wrong_dir_deg;
+	uint8_t  race_cw;
+	int16_t  stuck_thresh;
+	int16_t  stall_thresh;
+	int16_t  reverse_brake_cmd;
+	int16_t  reverse_drive_cmd;
+	int16_t  reverse_brake_ms;
+	int16_t  reverse_drive_ms;
+	int16_t  long_reverse_brake_ms;
+	int16_t  long_reverse_drive_ms;
+	float    long_forward_speed_cap;
+	int16_t  long_forward_ms;
+	uint8_t  wrong_detect_mode;
+	uint8_t  wrong_maneuver_mode;
+	float    wrong_sensor_thresh;
+	int16_t  burst_stop_ms;
+	int16_t  burst_pre_steer_ms;
+	float    burst_forward_speed;
+	int16_t  burst_forward_ms;
+	uint8_t  imu_rotate;
+	uint8_t  servo_reverse;
+	uint8_t  calibrated;
+	uint8_t  bat_enabled;
+	float    bat_multiplier;
+	float    bat_low;
+	int16_t  tach_glitch_filter_us;
+	uint8_t  checksum;
+};
+
+struct __attribute__((packed)) nvs_settings_v12 {
 	uint32_t magic;
 	uint8_t  version;
 	int16_t  front_obstacle_dist;
@@ -218,6 +275,13 @@ static void set_defaults(void)
 	cfg.long_reverse_drive_ms = 2400;
 	cfg.long_forward_speed_cap = 0.18f;
 	cfg.long_forward_ms = 550;
+	cfg.wrong_detect_mode = WRONG_DETECT_IMU;
+	cfg.wrong_maneuver_mode = WRONG_MANEUVER_LONG;
+	cfg.wrong_sensor_thresh = -20.0f;
+	cfg.burst_stop_ms = 100;
+	cfg.burst_pre_steer_ms = 20;
+	cfg.burst_forward_speed = 2.5f;
+	cfg.burst_forward_ms = 900;
 	cfg.imu_rotate    = true;
 	cfg.servo_reverse = false;
 	cfg.calibrated    = false;
@@ -272,6 +336,13 @@ static void sanitize_cfg(void)
 	cfg.coe_blocked = CLAMP(cfg.coe_blocked, 0.0f, 5.0f);
 	cfg.long_forward_speed_cap = CLAMP(cfg.long_forward_speed_cap, 0.0f, 2.0f);
 	cfg.wrong_dir_deg = CLAMP(cfg.wrong_dir_deg, 1.0f, 360.0f);
+	cfg.wrong_detect_mode = CLAMP(cfg.wrong_detect_mode, 0, 1);
+	cfg.wrong_maneuver_mode = CLAMP(cfg.wrong_maneuver_mode, 0, 1);
+	cfg.wrong_sensor_thresh = CLAMP(cfg.wrong_sensor_thresh, -10000.0f, 10000.0f);
+	cfg.burst_stop_ms = CLAMP(cfg.burst_stop_ms, 0, 5000);
+	cfg.burst_pre_steer_ms = CLAMP(cfg.burst_pre_steer_ms, 0, 5000);
+	cfg.burst_forward_ms = CLAMP(cfg.burst_forward_ms, 0, 5000);
+	cfg.burst_forward_speed = CLAMP(cfg.burst_forward_speed, 0.0f, 5.0f);
 	cfg.bat_multiplier = CLAMP(cfg.bat_multiplier, 0.1f, 20.0f);
 	cfg.bat_low = CLAMP(cfg.bat_low, 0.1f, 20.0f);
 
@@ -287,6 +358,8 @@ static void sanitize_cfg(void)
 	if (!isfinite(cfg.coe_blocked)) cfg.coe_blocked = 0.0f;
 	if (!isfinite(cfg.long_forward_speed_cap)) cfg.long_forward_speed_cap = 0.18f;
 	if (!isfinite(cfg.wrong_dir_deg)) cfg.wrong_dir_deg = 120.0f;
+	if (!isfinite(cfg.wrong_sensor_thresh)) cfg.wrong_sensor_thresh = -20.0f;
+	if (!isfinite(cfg.burst_forward_speed)) cfg.burst_forward_speed = 2.5f;
 	if (!isfinite(cfg.bat_multiplier)) cfg.bat_multiplier = 4.85f;
 	if (!isfinite(cfg.bat_low)) cfg.bat_low = 6.0f;
 }
@@ -319,6 +392,18 @@ static uint8_t compute_checksum_v11(const struct nvs_settings_v11 *s)
 	uint8_t sum = 0;
 	const uint8_t *p = (const uint8_t *)s;
 	size_t len = sizeof(*s) - 1;  /* exclude checksum byte */
+	for (size_t i = 0; i < len; i++) {
+		sum += p[i];
+	}
+	return sum;
+}
+
+static uint8_t compute_checksum_v12(const struct nvs_settings_v12 *s)
+{
+	uint8_t sum = 0;
+	const uint8_t *p = (const uint8_t *)s;
+	size_t len = sizeof(*s) - 1;
+
 	for (size_t i = 0; i < len; i++) {
 		sum += p[i];
 	}
@@ -366,6 +451,13 @@ static void populate_nvs(struct nvs_settings *s)
 	s->long_reverse_drive_ms = (int16_t)cfg.long_reverse_drive_ms;
 	s->long_forward_speed_cap = cfg.long_forward_speed_cap;
 	s->long_forward_ms = (int16_t)cfg.long_forward_ms;
+	s->wrong_detect_mode = cfg.wrong_detect_mode;
+	s->wrong_maneuver_mode = cfg.wrong_maneuver_mode;
+	s->wrong_sensor_thresh = cfg.wrong_sensor_thresh;
+	s->burst_stop_ms = (int16_t)cfg.burst_stop_ms;
+	s->burst_pre_steer_ms = (int16_t)cfg.burst_pre_steer_ms;
+	s->burst_forward_speed = cfg.burst_forward_speed;
+	s->burst_forward_ms = (int16_t)cfg.burst_forward_ms;
 	s->imu_rotate    = cfg.imu_rotate ? 1 : 0;
 	s->servo_reverse = cfg.servo_reverse ? 1 : 0;
 	s->calibrated    = cfg.calibrated ? 1 : 0;
@@ -415,6 +507,13 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.long_reverse_drive_ms = s->long_reverse_drive_ms;
 	cfg.long_forward_speed_cap = s->long_forward_speed_cap;
 	cfg.long_forward_ms = s->long_forward_ms;
+	cfg.wrong_detect_mode = s->wrong_detect_mode;
+	cfg.wrong_maneuver_mode = s->wrong_maneuver_mode;
+	cfg.wrong_sensor_thresh = s->wrong_sensor_thresh;
+	cfg.burst_stop_ms = s->burst_stop_ms;
+	cfg.burst_pre_steer_ms = s->burst_pre_steer_ms;
+	cfg.burst_forward_speed = s->burst_forward_speed;
+	cfg.burst_forward_ms = s->burst_forward_ms;
 	cfg.imu_rotate    = s->imu_rotate != 0;
 	cfg.servo_reverse = s->servo_reverse != 0;
 	cfg.calibrated    = s->calibrated != 0;
@@ -422,6 +521,61 @@ static void apply_nvs(const struct nvs_settings *s)
 	cfg.bat_multiplier = s->bat_multiplier;
 	cfg.bat_low       = s->bat_low;
 	cfg.tach_glitch_filter_us = s->tach_glitch_filter_us;
+	sanitize_cfg();
+}
+
+static void apply_nvs_v12(const struct nvs_settings_v12 *s)
+{
+	cfg.front_obstacle_dist = s->front_obstacle_dist;
+	cfg.side_open_dist      = s->side_open_dist;
+	cfg.all_close_dist      = s->all_close_dist;
+	cfg.close_front_dist    = s->close_front_dist;
+	cfg.pid_kp       = s->pid_kp;
+	cfg.pid_ki       = s->pid_ki;
+	cfg.pid_kd       = s->pid_kd;
+	cfg.min_speed    = s->min_speed;
+	cfg.max_speed    = s->max_speed;
+	cfg.min_bspeed   = s->min_bspeed;
+	cfg.min_point    = s->min_point;
+	cfg.max_point    = s->max_point;
+	cfg.neutral_point = s->neutral_point;
+	cfg.encoder_holes = s->encoder_holes;
+	cfg.wheel_diam_m  = s->wheel_diam_m;
+	cfg.loop_ms       = s->loop_ms;
+	cfg.spd_clear     = s->spd_clear;
+	cfg.spd_blocked   = s->spd_blocked;
+	cfg.spd_slew      = s->spd_slew;
+	cfg.kick_pct      = s->kick_pct;
+	cfg.kick_ms       = s->kick_ms;
+	cfg.corner_kick_us = s->corner_kick_us;
+	cfg.coe_clear     = s->coe_clear;
+	cfg.coe_blocked   = s->coe_blocked;
+	cfg.wrong_dir_deg = s->wrong_dir_deg;
+	cfg.race_cw       = s->race_cw != 0;
+	cfg.stuck_thresh  = s->stuck_thresh;
+	cfg.stall_thresh  = s->stall_thresh;
+	cfg.reverse_brake_cmd = s->reverse_brake_cmd;
+	cfg.reverse_drive_cmd = s->reverse_drive_cmd;
+	cfg.reverse_brake_ms = s->reverse_brake_ms;
+	cfg.reverse_drive_ms = s->reverse_drive_ms;
+	cfg.long_reverse_brake_ms = s->long_reverse_brake_ms;
+	cfg.long_reverse_drive_ms = s->long_reverse_drive_ms;
+	cfg.long_forward_speed_cap = s->long_forward_speed_cap;
+	cfg.long_forward_ms = s->long_forward_ms;
+	cfg.imu_rotate    = s->imu_rotate != 0;
+	cfg.servo_reverse = s->servo_reverse != 0;
+	cfg.calibrated    = s->calibrated != 0;
+	cfg.bat_enabled   = s->bat_enabled != 0;
+	cfg.bat_multiplier = s->bat_multiplier;
+	cfg.bat_low       = s->bat_low;
+	cfg.tach_glitch_filter_us = s->tach_glitch_filter_us;
+	cfg.wrong_detect_mode = WRONG_DETECT_IMU;
+	cfg.wrong_maneuver_mode = WRONG_MANEUVER_LONG;
+	cfg.wrong_sensor_thresh = -20.0f;
+	cfg.burst_stop_ms = 100;
+	cfg.burst_pre_steer_ms = 20;
+	cfg.burst_forward_speed = 2.5f;
+	cfg.burst_forward_ms = 900;
 	sanitize_cfg();
 }
 
@@ -551,6 +705,7 @@ bool settings_load(void)
 	uint8_t buf[sizeof(struct nvs_settings)];
 	ssize_t len = nvs_read(&nvs, NVS_KEY_SETTINGS, buf, sizeof(buf));
 	if (len != sizeof(struct nvs_settings) &&
+	    len != sizeof(struct nvs_settings_v12) &&
 	    len != sizeof(struct nvs_settings_v11) &&
 	    len != sizeof(struct nvs_settings_v10)) {
 		LOG_INF("No saved settings (len=%zd)", len);
@@ -571,6 +726,15 @@ bool settings_load(void)
 			return false;
 		}
 		apply_nvs(s);
+	} else if (len == sizeof(struct nvs_settings_v12) &&
+		   s->version == SETTINGS_VERSION_V12) {
+		const struct nvs_settings_v12 *s12 = (const struct nvs_settings_v12 *)buf;
+		if (compute_checksum_v12(s12) != s12->checksum) {
+			k_mutex_unlock(&cfg_mutex);
+			LOG_WRN("Settings v12 checksum mismatch");
+			return false;
+		}
+		apply_nvs_v12(s12);
 	} else if (len == sizeof(struct nvs_settings_v11) &&
 		   s->version == SETTINGS_VERSION_V11) {
 		const struct nvs_settings_v11 *s11 = (const struct nvs_settings_v11 *)buf;

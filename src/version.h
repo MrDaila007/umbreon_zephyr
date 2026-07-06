@@ -8,5 +8,5 @@
 #define FW_BUILD_LABEL "DEV"
 #endif
 
-#define FW_VERSION "2.0.6"
+#define FW_VERSION "2.0.7"
 #define FW_VERSION_FULL FW_VERSION " (" FW_GIT_HASH ")"

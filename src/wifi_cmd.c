@@ -470,6 +470,9 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
+	else if (strcmp(key, "WDT")  == 0) cfg.wrong_detect_mode   = CLAMP(atoi(val), 0, 1);
+	else if (strcmp(key, "WMT")  == 0) cfg.wrong_maneuver_mode = CLAMP(atoi(val), 0, 1);
+	else if (strcmp(key, "WST")  == 0) cfg.wrong_sensor_thresh = strtof(val, NULL);
 	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "STL")  == 0) cfg.stall_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "RBC")  == 0) cfg.reverse_brake_cmd   = CLAMP(atoi(val), -1000, 0);
@@ -480,6 +483,10 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "LDM")  == 0) cfg.long_reverse_drive_ms = CLAMP(atoi(val), 0, 5000);
 	else if (strcmp(key, "LFS")  == 0) cfg.long_forward_speed_cap = strtof(val, NULL);
 	else if (strcmp(key, "LFM")  == 0) cfg.long_forward_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BSM")  == 0) cfg.burst_stop_ms      = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BPS")  == 0) cfg.burst_pre_steer_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BFS")  == 0) cfg.burst_forward_speed = strtof(val, NULL);
+	else if (strcmp(key, "BFM")  == 0) cfg.burst_forward_ms   = CLAMP(atoi(val), 0, 5000);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -510,8 +517,9 @@ static void cmd_get(void)
 		",ENH=%d,WDM=%.4f,LMS=%d"
 		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d,CKU=%d"
 		",COE1=%.2f,COE2=%.2f"
-		",WDD=%.1f,RCW=%d,STK=%d,STL=%d"
+		",WDD=%.1f,RCW=%d,WDT=%d,WMT=%d,WST=%.1f,STK=%d,STL=%d"
 		",RBC=%d,RDC=%d,RBM=%d,RDM=%d,LBM=%d,LDM=%d,LFS=%.2f,LFM=%d"
+		",BSM=%d,BPS=%d,BFS=%.2f,BFM=%d"
 		",IMR=%d,SVR=%d,CAL=%d"
 		",BEN=%d,BML=%.4f,BLV=%.1f"
 		",TGF=%d"
@@ -527,11 +535,15 @@ static void cmd_get(void)
 		(double)c.kick_pct, c.kick_ms, c.corner_kick_us,
 		(double)c.coe_clear, (double)c.coe_blocked,
 		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0,
+		c.wrong_detect_mode, c.wrong_maneuver_mode,
+		(double)c.wrong_sensor_thresh,
 		c.stuck_thresh, c.stall_thresh,
 		c.reverse_brake_cmd, c.reverse_drive_cmd,
 		c.reverse_brake_ms, c.reverse_drive_ms,
 		c.long_reverse_brake_ms, c.long_reverse_drive_ms,
 		(double)c.long_forward_speed_cap, c.long_forward_ms,
+		c.burst_stop_ms, c.burst_pre_steer_ms,
+		(double)c.burst_forward_speed, c.burst_forward_ms,
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,

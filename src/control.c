@@ -245,6 +245,10 @@ enum mnv_phase {
 	MNV_LONG_NEUTRAL,
 	MNV_LONG_REVERSE,
 	MNV_LONG_FORWARD,
+	/* wrong-direction burst (Danila-style) */
+	MNV_BURST_STOP,
+	MNV_BURST_PRE_STEER,
+	MNV_BURST_FORWARD,
 };
 
 static volatile enum mnv_phase mnv;
@@ -252,6 +256,8 @@ static int64_t  mnv_deadline;
 static int      mnv_steer;
 static uint32_t mnv_start_count;
 static int      mnv_alt;
+static bool     mnv_burst_chain;
+static float    turns_sensor;
 
 /* ── Maneuver starters ──────────────────────────────────────────────────── */
 
@@ -271,8 +277,21 @@ static void maneuver_start_back(const struct car_settings *c)
 
 	send_run_state(RUN_REVERSE, stuck_time, turns, 0, mnv_steer);
 	car_write_speed(0);
+	mnv_burst_chain = false;
 	mnv_deadline = k_uptime_get() + c->reverse_drive_ms;
 	mnv = MNV_BACK_WAIT_STOP;
+	stuck_time = 0;
+}
+
+static void maneuver_start_burst(const struct car_settings *c)
+{
+	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
+	car_write_speed(0);
+	mnv_steer = c->race_cw ? 1000 : -1000;
+	car_write_steer(mnv_steer);
+	mnv_burst_chain = true;
+	mnv_deadline = k_uptime_get() + c->burst_stop_ms;
+	mnv = MNV_BURST_STOP;
 	stuck_time = 0;
 }
 
@@ -281,7 +300,7 @@ static void maneuver_start_long(const struct car_settings *c)
 	send_run_state(RUN_WRONG_DIR, stuck_time, turns, 0, 0);
 	car_write_speed(0);
 	car_write_steer(c->race_cw ? 1000 : -1000);
-	mnv_deadline = k_uptime_get() + c->reverse_drive_ms;
+	mnv_burst_chain = false;
 	mnv = MNV_LONG_WAIT_STOP;
 }
 
@@ -347,6 +366,14 @@ static void maneuver_tick(const struct car_settings *c)
 		if ((front_clear && dist >= REVERSE_MIN_DIST) ||
 		    now >= mnv_deadline) {
 			car_write_speed(0);
+			if (mnv_burst_chain) {
+				mnv_burst_chain = false;
+				car_write_steer(c->race_cw ? -1000 : 1000);
+				car_write_speed_ms(c->burst_forward_speed);
+				mnv_deadline = now + c->burst_forward_ms;
+				mnv = MNV_BURST_FORWARD;
+				break;
+			}
 			car_write_steer(mnv_steer);
 			imu_reset_heading();
 			send_run_state(RUN_REVERSE, 0, turns, 0, mnv_steer);
@@ -406,6 +433,35 @@ static void maneuver_tick(const struct car_settings *c)
 		car_pid_control();
 		if (now >= mnv_deadline) {
 			turns = 0.0f;
+			turns_sensor = 0.0f;
+			imu_reset_heading();
+			send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
+			mnv = MNV_NONE;
+		}
+		break;
+
+	/* ── wrong-direction burst phases ─────────────────────────────── */
+
+	case MNV_BURST_STOP:
+		if (now >= mnv_deadline) {
+			car_write_steer(mnv_steer);
+			mnv_deadline = now + c->burst_pre_steer_ms;
+			mnv = MNV_BURST_PRE_STEER;
+		}
+		break;
+
+	case MNV_BURST_PRE_STEER:
+		if (now >= mnv_deadline) {
+			mnv_deadline = k_uptime_get() + c->reverse_drive_ms;
+			mnv = MNV_BACK_WAIT_STOP;
+		}
+		break;
+
+	case MNV_BURST_FORWARD:
+		car_pid_control();
+		if (now >= mnv_deadline) {
+			turns = 0.0f;
+			turns_sensor = 0.0f;
 			imu_reset_heading();
 			send_run_state(RUN_WRONG_DIR, 0, turns, 0, 0);
 			mnv = MNV_NONE;
@@ -658,20 +714,38 @@ static void work(const struct car_settings *c)
 	}
 
 	/* ── Wrong-direction detection ─────────────────────────────────────── */
-	turns += imu_get_yaw_rate() * (c->loop_ms / 1000.0f);
-	if (c->race_cw && turns < 0.0f) {
-		turns *= 0.97f;
-	}
-	if (!c->race_cw && turns > 0.0f) {
-		turns *= 0.97f;
-	}
-	turns = CLAMP(turns, -200.0f, 200.0f);
+	float speed = control_taho_get_speed();
+	bool wrong_way = false;
 
-	bool wrong_way = c->race_cw ? (turns > c->wrong_dir_deg)
-				     : (turns < -c->wrong_dir_deg);
+	if (c->wrong_detect_mode == WRONG_DETECT_SENSOR) {
+		int left = steer_distance(s[IDX_LEFT]);
+		int right = steer_distance(s[IDX_RIGHT]);
+		turns_sensor += (float)(right - left) * speed / 1000.0f;
+		turns_sensor = CLAMP(turns_sensor, -10000.0f, 80.0f);
+		if (c->race_cw) {
+			wrong_way = turns_sensor < c->wrong_sensor_thresh;
+		} else {
+			wrong_way = turns_sensor > -c->wrong_sensor_thresh;
+		}
+	} else {
+		turns += imu_get_yaw_rate() * (c->loop_ms / 1000.0f);
+		if (c->race_cw && turns < 0.0f) {
+			turns *= 0.97f;
+		}
+		if (!c->race_cw && turns > 0.0f) {
+			turns *= 0.97f;
+		}
+		turns = CLAMP(turns, -200.0f, 200.0f);
+		wrong_way = c->race_cw ? (turns > c->wrong_dir_deg)
+				       : (turns < -c->wrong_dir_deg);
+	}
 
 	if (wrong_way) {
-		maneuver_start_long(c);
+		if (c->wrong_maneuver_mode == WRONG_MANEUVER_BURST) {
+			maneuver_start_burst(c);
+		} else {
+			maneuver_start_long(c);
+		}
 #if IS_ENABLED(CONFIG_APP_RUN_PROFILING)
 		prof_stuck_us = prof_elapsed_us(prof_mark, prof_now_cyc());
 #endif
