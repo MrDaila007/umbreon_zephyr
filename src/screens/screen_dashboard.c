@@ -15,6 +15,7 @@
 #include "../imu.h"
 #include "../control.h"
 #include "../settings.h"
+#include "../version.h"
 
 #include <u8g2.h>
 #include <stdio.h>
@@ -67,13 +68,15 @@ static void draw_status_bar(void)
 	buf[7] = '\0';
 	u8g2_DrawStr(&u8g2, 0, 7, buf);
 
-	/* Voltage + percent */
-	snprintf(buf, sizeof(buf), "%d%% %.1fV", pct, (double)vbat);
+	/* Charge percent */
+	snprintf(buf, sizeof(buf), "%3d%%", pct);
 	u8g2_DrawStr(&u8g2, 38, 7, buf);
 
-	/* Mode (right-aligned area) */
-	const char *mode = control_is_running() ? "RUN " : "IDLE";
-	u8g2_DrawStr(&u8g2, 96, 7, mode);
+	/* Mode + build type */
+	const char *mode = control_is_running() ? "RUN" : "IDLE";
+	u8g2_DrawStr(&u8g2, 68, 7, mode);
+	int bl_w = u8g2_GetStrWidth(&u8g2, FW_BUILD_LABEL);
+	u8g2_DrawStr(&u8g2, SCR_W - bl_w, 7, FW_BUILD_LABEL);
 }
 
 /* ─── Sensor bars ────────────────────────────────────────────────────────── */

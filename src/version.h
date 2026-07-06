@@ -5,7 +5,8 @@
 #else
 #define FW_GIT_HASH "nogit"
 #define FW_COMMIT_SUBJECT "unknown"
+#define FW_BUILD_LABEL "DEV"
 #endif
 
-#define FW_VERSION "2.0.4"
+#define FW_VERSION "2.0.5"
 #define FW_VERSION_FULL FW_VERSION " (" FW_GIT_HASH ")"

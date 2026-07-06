@@ -55,6 +55,12 @@ if(Git_FOUND)
   endif()
 endif()
 
+if(RACE_BUILD)
+  set(FW_BUILD_LABEL "RACE")
+else()
+  set(FW_BUILD_LABEL "BENCH")
+endif()
+
 string(REPLACE "\\" "\\\\" FW_COMMIT_SUBJECT "${FW_COMMIT_SUBJECT}")
 string(REPLACE "\"" "\\\"" FW_COMMIT_SUBJECT "${FW_COMMIT_SUBJECT}")
 configure_file(

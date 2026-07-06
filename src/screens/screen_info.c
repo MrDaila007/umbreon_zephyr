@@ -32,6 +32,7 @@ void screen_info_draw(const struct ui_state *st)
 
 	/* Build info lines */
 	snprintf(lines[count++], 22, "FW: %s", FW_VERSION_FULL);
+	snprintf(lines[count++], 22, "Build: %s", FW_BUILD_LABEL);
 	snprintf(lines[count++], 22, "Core: M33 Zephyr v4.4");
 	snprintf(lines[count++], 22, "Sensors: %d/6 online", sensors_online_count());
 	snprintf(lines[count++], 22, "IMU: %s", imu_is_ok() ? "OK" : "FAIL");

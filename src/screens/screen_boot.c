@@ -27,6 +27,9 @@ void screen_boot_draw(const char *status)
 	int ver_y = ly + UMBREON_LOGO_H + 6;
 	u8g2_DrawStr(&u8g2, (SCR_W - vw) / 2, ver_y, ver);
 
+	int bw = u8g2_GetStrWidth(&u8g2, FW_BUILD_LABEL);
+	u8g2_DrawStr(&u8g2, (SCR_W - bw) / 2, ver_y + 9, FW_BUILD_LABEL);
+
 	int sw = u8g2_GetStrWidth(&u8g2, line);
 	if (sw > SCR_W - 4) {
 		sw = SCR_W - 4;
