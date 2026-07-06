@@ -42,7 +42,9 @@ LOG_MODULE_REGISTER(wifi_cmd, LOG_LEVEL_INF);
 
 /* ─── UART devices ────────────────────────────────────────────────────────── */
 static const struct device *uart_dev;
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
 static const struct device *debug_uart_dev;
+#endif
 
 /* ─── Ring buffer for UART RX ─────────────────────────────────────────────── */
 #define RX_BUF_SIZE 512
@@ -87,8 +89,10 @@ static char ws_ap_pass[64];
 static K_THREAD_STACK_DEFINE(wifi_stack, CONFIG_APP_WIFI_CMD_STACK_SIZE);
 static struct k_thread wifi_thread_data;
 
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
 static K_THREAD_STACK_DEFINE(debug_uart_stack, CONFIG_APP_DEBUG_UART_STACK_SIZE);
 static struct k_thread debug_uart_thread_data;
+#endif
 
 static K_MUTEX_DEFINE(debug_uart_tx_mutex);
 
@@ -310,6 +314,7 @@ bool wifi_log_enabled(void)
 	return log_on;
 }
 
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
 static void debug_uart_thread(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1);
@@ -341,6 +346,7 @@ static void debug_uart_thread(void *p1, void *p2, void *p3)
 		}
 	}
 }
+#endif
 
 /* ─── Ring buffer helpers ─────────────────────────────────────────────────── */
 
@@ -920,12 +926,6 @@ void wifi_cmd_init(void)
 		return;
 	}
 
-	debug_uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
-	if (!device_is_ready(debug_uart_dev)) {
-		LOG_WRN("UART0 debug command RX not ready");
-		debug_uart_dev = NULL;
-	}
-
 	uart_irq_callback_set(uart_dev, uart_isr);
 	uart_irq_rx_enable(uart_dev);
 
@@ -941,15 +941,22 @@ void wifi_cmd_init(void)
 			CONFIG_APP_WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_async_thread_data, "wifi_async");
 
-	if (debug_uart_dev) {
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
+	debug_uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+	if (!device_is_ready(debug_uart_dev)) {
+		LOG_WRN("UART0 debug command RX not ready");
+		debug_uart_dev = NULL;
+	} else {
 		k_thread_create(&debug_uart_thread_data, debug_uart_stack,
 				K_THREAD_STACK_SIZEOF(debug_uart_stack),
 				debug_uart_thread, NULL, NULL, NULL,
 				CONFIG_APP_DEBUG_UART_PRIORITY, 0, K_NO_WAIT);
 		k_thread_name_set(&debug_uart_thread_data, "debug_uart_cmd");
 	}
+#endif
 
-	LOG_INF("WiFi CMD init (UART1 GP4/GP5 + UART0 GP16/GP17 debug, 115200)");
+	LOG_INF("WiFi CMD init (UART1 GP4/GP5%s)",
+		IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD) ? " + UART0 debug" : "");
 }
 
 bool        wifi_status_is_ready(void)    { return ws_ready; }

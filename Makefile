@@ -3,6 +3,7 @@ SHELL := /bin/bash
 BOARD        ?= rpi_pico2/rp2350a/m33
 ZEPHYR_DIR   ?= $(HOME)/zephyrproject-v4.4
 BUILD_DIR    ?= $(CURDIR)/build
+BENCH_BUILD_DIR ?= $(CURDIR)/build-bench
 SRC_DIR      ?= $(CURDIR)
 MOUNT_POINT  ?= /media/$(USER)/RP2350
 SERIAL_PORT  ?= /dev/ttyACM0
@@ -32,7 +33,7 @@ SIM_PATH     ?= /home/$(USER)/Documents/roborace/simulation/sim.py
 VERSION_FILE ?= src/version.h
 PART         ?= patch
 
-.PHONY: setup install-hooks build build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
+.PHONY: setup install-hooks build build-race build-bench build-usb build-hil flash flash-probe flash-stlink monitor monitor-uart0 monitor-probe clean test test-host test-ztest \
 	hil-deps hil-real hil-sim hil-dual hil-smoke hil-endurance hil-motor wifi-run-log check-ui check-ui-dashboard check-ui-screens \
 	version-show version-bump version-patch version-minor version-major
 
@@ -66,15 +67,22 @@ check-ui-dashboard:
 check-ui-screens:
 	$(PYTHON_BIN) tools/sim_dashboard.py --source src/screens
 
-build:
+build: build-race
+
+build-race:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
-	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR)
+	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR) -- -DRACE_BUILD=ON
+
+build-bench:
+	source $(ZEPHYR_DIR)/.venv/bin/activate && \
+	cd $(ZEPHYR_DIR) && \
+	west build -b $(BOARD) -d $(BENCH_BUILD_DIR) --pristine always $(SRC_DIR) -- -DRACE_BUILD=OFF
 
 build-usb:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \
 	cd $(ZEPHYR_DIR) && \
-	west build -b $(BOARD) -d $(BUILD_DIR) --pristine always $(SRC_DIR) -- -DUSB_CONSOLE=ON
+	west build -b $(BOARD) -d $(BENCH_BUILD_DIR) --pristine always $(SRC_DIR) -- -DRACE_BUILD=OFF -DUSB_CONSOLE=ON
 
 build-hil:
 	source $(ZEPHYR_DIR)/.venv/bin/activate && \

@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20.0)
 
+set(RACE_BUILD ON CACHE BOOL "Race/track build: no UART0 console, logs, or bench debug thread")
+if(RACE_BUILD)
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/race.conf)
+endif()
+
 set(USB_CONSOLE OFF CACHE BOOL "Use USB CDC-ACM for debug console instead of UART0")
 if(USB_CONSOLE)
   list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/usb_console.conf)

@@ -7,5 +7,5 @@
 #define FW_COMMIT_SUBJECT "unknown"
 #endif
 
-#define FW_VERSION "2.0.3"
+#define FW_VERSION "2.0.4"
 #define FW_VERSION_FULL FW_VERSION " (" FW_GIT_HASH ")"

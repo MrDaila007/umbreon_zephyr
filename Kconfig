@@ -63,13 +63,23 @@ config APP_WIFI_ASYNC_PRIORITY
 	range 0 15
 	default 6
 
+config APP_DEBUG_UART_CMD
+	bool "UART0 debug command thread (GP16/GP17)"
+	default y
+	help
+	  Poll UART0 for the same $ commands accepted on the WiFi bridge.
+	  Intended for bench work with a USB-serial adapter or debug probe.
+	  Disable for race/track builds to save RAM, CPU, and UART0 bandwidth.
+
 config APP_DEBUG_UART_STACK_SIZE
 	int "Debug UART command thread stack size"
+	depends on APP_DEBUG_UART_CMD
 	range 512 16384
 	default 4096
 
 config APP_DEBUG_UART_PRIORITY
 	int "Debug UART command thread priority"
+	depends on APP_DEBUG_UART_CMD
 	range 0 15
 	default 7
 
@@ -215,6 +225,7 @@ config APP_RUN_PROFILING_CONSOLE
 
 config APP_WIFI_DEBUG_UART_MIRROR
 	bool "Mirror WiFi protocol TX to UART0 debug console"
+	depends on APP_DEBUG_UART_CMD
 	default n
 	help
 	  When enabled, every wifi_cmd_send()/wifi_cmd_printf() payload is also

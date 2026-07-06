@@ -1,4 +1,7 @@
+# Zephyr west build trees (race, bench, USB, etc.)
 build/
+build-*/
+
 __pycache__/
 *.pyc
 *.o
@@ -6,6 +9,7 @@ __pycache__/
 *.bin
 *.hex
 *.map
+*.uf2
 
 # Host test binaries
 tests/test_unit

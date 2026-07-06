@@ -5,8 +5,9 @@
 - Manual setup: See README for Zephyr SDK 1.0 and Zephyr v4.4 Python venv
 
 ## Build
-- Standard (UART0 console): `make build`
-- USB console: `make build-usb`
+- Race / track (default, no UART0 debug): `make build` or `make build-race` → `./build`
+- Bench debug (UART0 console, logs, $ commands on GP16/GP17): `make build-bench` → `./build-bench`
+- USB console (bench): `make build-usb`
 - HIL (no sensors): `make build-hil`
 - Manual west build: `cd ~/zephyrproject-v4.4 && source .venv/bin/activate && west build -b rpi_pico2/rp2350a/m33 -d /path/to/umbreon_zephyr/build --pristine always /path/to/umbreon_zephyr`
 
