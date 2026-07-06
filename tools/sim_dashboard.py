@@ -691,6 +691,7 @@ def write_source_harness(tmpdir, repo_root, screens_dir, funcs):
             {"Save NVS",ACT_SAVE,true}, {"Load NVS",ACT_LOAD,true},
             {"Reset Defaults",ACT_RESET,true},
             {"Gyro Cal",ACT_GYRO_CAL,false}, {"Accel Cal",ACT_ACCEL_CAL,false},
+            {"Restart Lidar",ACT_SNS_RECOVER,true},
         };
         const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info", "WiFi"};
 

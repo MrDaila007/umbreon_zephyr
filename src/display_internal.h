@@ -80,7 +80,7 @@ struct test_item {
 
 /* ─── Action item ────────────────────────────────────────────────────────── */
 enum action_id { ACT_START, ACT_STOP, ACT_SAVE, ACT_LOAD, ACT_RESET,
-		 ACT_GYRO_CAL, ACT_ACCEL_CAL };
+		 ACT_GYRO_CAL, ACT_ACCEL_CAL, ACT_SNS_RECOVER };
 
 struct action_item {
 	const char *label;
@@ -92,7 +92,7 @@ struct action_item {
 #define PARAM_COUNT   43
 #define GROUP_COUNT    9
 #define TEST_COUNT     8
-#define ACTION_COUNT   7
+#define ACTION_COUNT   8
 #define MAIN_REAL      5
 #define LIST_VISIBLE   5
 

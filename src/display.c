@@ -146,6 +146,7 @@ const struct action_item actions[ACTION_COUNT] = {
 	{"Reset Defaults", ACT_RESET, true},
 	{"Gyro Cal",       ACT_GYRO_CAL,  false},
 	{"Accel Cal",      ACT_ACCEL_CAL, false},
+	{"Restart Lidar",  ACT_SNS_RECOVER, true},
 };
 
 const char *main_items[MAIN_REAL] = {"Settings", "Tests", "Actions", "Info", "WiFi"};
@@ -299,6 +300,7 @@ static void exec_action(enum action_id id)
 	case ACT_SAVE:  cmd = MCMD_SAVE;  break;
 	case ACT_LOAD:  cmd = MCMD_LOAD;  break;
 	case ACT_RESET: cmd = MCMD_RESET; break;
+	case ACT_SNS_RECOVER: cmd = MCMD_SNS_RECOVER; break;
 	default: return;
 	}
 	k_msgq_put(&menu_cmd_q, &cmd, K_NO_WAIT);

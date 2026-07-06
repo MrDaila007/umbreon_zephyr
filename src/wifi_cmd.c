@@ -900,6 +900,18 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 				sync_tach_glitch_filter();
 				wifi_cmd_send("$ACK\n");
 				break;
+			case MCMD_SNS_RECOVER:
+				control_cmd_stop();
+				wifi_cmd_send("$T:SNS,phase=manual_recovery_start\n");
+				{
+					bool ok = sensors_recover_all();
+					wifi_cmd_printf("$T:SNS,phase=manual_recovery_done,ok=%d,online=%d,restarts=%u\n",
+							ok ? 1 : 0,
+							sensors_online_count(),
+							(unsigned int)sensors_restart_count());
+					buzzer_play(ok ? BUZZER_CAL_DONE : BUZZER_ERROR);
+				}
+				break;
 			default:
 				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
 					static const char *test_names[] = {
