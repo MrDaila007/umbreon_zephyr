@@ -97,8 +97,8 @@ const struct param_desc params[PARAM_COUNT] = {
 	{"RCW", "Race CW",    PT_BOOL,  1,    1,     0, 1,    P_OFF(race_cw),             1},
 	{"STK", "Stuck Thr",  PT_INT,   1,    5,     0, 1000, P_OFF(stuck_thresh),        1},
 	{"STL", "Stall Thr",  PT_INT,   1,    5,     0, 1000, P_OFF(stall_thresh),        1},
-	{"WDT", "Det Mode",   PT_INT,   1,    1,     0, 1,    P_OFF(wrong_detect_mode),   1},
-	{"WMT", "Mnv Mode",   PT_INT,   1,    1,     0, 1,    P_OFF(wrong_maneuver_mode), 1},
+	{"WDT", "Det Mode",   PT_BOOL,  1,    1,     0, 1,    P_OFF(wrong_detect_mode),   1},
+	{"WMT", "Mnv Mode",   PT_BOOL,  1,    1,     0, 1,    P_OFF(wrong_maneuver_mode), 1},
 	{"WST", "Sens Thr",   PT_FLOAT, 1.0f, 5.0f,-10000, 10000, P_OFF(wrong_sensor_thresh), 1},
 	/* Maneuvers */
 	{"RBC", "Rev Brk",    PT_INT,   5,   20, -1000, 0,    P_OFF(reverse_brake_cmd),   1},
