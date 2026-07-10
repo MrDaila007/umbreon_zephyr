@@ -1,7 +1,7 @@
 /*
  * encoder.c — Rotary encoder driver (GP22=CLK, GP12=DT, GP19=SW)
  *
- * GPIO interrupts for rotation and button presses.
+ * 1 kHz polling for rotation and button state.
  * Display thread calls encoder_poll() each tick to get events.
  */
 
@@ -20,113 +20,178 @@ static const struct gpio_dt_spec enc_clk = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_a),
 static const struct gpio_dt_spec enc_dt  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_b), gpios);
 static const struct gpio_dt_spec enc_sw  = GPIO_DT_SPEC_GET(DT_NODELABEL(enc_sw), gpios);
 
-static struct gpio_callback clk_cb_data;
-static struct gpio_callback sw_cb_data;
+#define ENCODER_REVERSE    false   /* Set to true to reverse rotation direction */	
+
+#define ENC_BTN_DEBOUNCE_MS   50
+#define ENC_BTN_CLICK_MS     500
+#define ENC_BTN_HOLD_MS      600
+#define ENC_BTN_LONG_HOLD_MS 3000
+
+static K_THREAD_STACK_DEFINE(encoder_stack, CONFIG_APP_ENCODER_STACK_SIZE);
+static struct k_thread encoder_thread_data;
 
 /* ─── Rotation state ─────────────────────────────────────────────────────── */
 static atomic_t rotation_counter;    /* net rotation steps */
-static uint32_t last_clk_us;        /* debounce timestamp */
 
-/* Quadrature state: track previous CLK for step4 decoding */
+/* Quadrature state: track previous CLK/DT for step4 decoding */
 static volatile uint8_t enc_state;   /* 2-bit: (old_CLK << 1) | old_DT */
-static volatile int8_t enc_accum;    /* accumulate 4 transitions per detent */
+static volatile int8_t enc_accum;    /* EncButton-style epos accumulator */
+static atomic_t transition_counter;
+static atomic_t invalid_counter;
+static atomic_t same_counter;
+static atomic_t synth_counter;
+static atomic_t state_counter[4];
 
 /* ─── Button state ───────────────────────────────────────────────────────── */
-static atomic_t press_time_ms;       /* timestamp of last press (0 = none) */
-static atomic_t prev_press_ms;       /* timestamp of press before last */
-static uint32_t last_sw_us;         /* debounce */
+static atomic_t button_events;
+static bool btn_raw;
+static bool btn_state;
+static bool btn_debouncing;
+static bool btn_hold_sent;
+static bool btn_long_hold_sent;
+static int64_t btn_debounce_ms;
+static int64_t btn_press_ms;
+static int64_t btn_last_click_ms;
+static bool encoder_ready;
 
-/* ─── Rotation ISR ───────────────────────────────────────────────────────── */
+/* ─── Rotation polling ───────────────────────────────────────────────────── */
 
-/* Standard quadrature decode lookup: oldstate -> newstate -> direction
- * Only valid transitions produce ±1, invalid ones produce 0 */
-static const int8_t quad_table[16] = {
-	 0, -1,  1,  0,
-	 1,  0,  0, -1,
-	-1,  0,  0,  1,
-	 0,  1, -1,  0,
-};
-
-static void clk_isr(const struct device *dev, struct gpio_callback *cb,
-		     uint32_t pins)
+static uint8_t read_ab_state(void)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(pins);
-
-	/* Debounce: ignore edges within 1ms */
-	uint32_t now = k_cycle_get_32();
-	uint32_t elapsed_us = k_cyc_to_us_floor32(now - last_clk_us);
-	if (elapsed_us < 1000) {
-		return;
-	}
-	last_clk_us = now;
-
-	/* Read current state */
 	int clk_val = gpio_pin_get_dt(&enc_clk);
 	int dt_val  = gpio_pin_get_dt(&enc_dt);
-	uint8_t new_state = ((uint8_t)clk_val << 1) | (uint8_t)dt_val;
+	return ((uint8_t)clk_val << 1) | (uint8_t)dt_val;
+}
 
-	/* Lookup direction from state transition */
-	int8_t dir = quad_table[(enc_state << 2) | new_state];
-	enc_state = new_state;
-
-	if (dir == 0) {
+static void process_ab_state(uint8_t new_state)
+{
+	uint8_t old_state = enc_state;
+	if (new_state == old_state) {
 		return;
 	}
 
-	/* Accumulate — 4 transitions per detent (EB_STEP4) */
-	enc_accum += dir;
-	if (enc_accum >= 4) {
-		atomic_inc(&rotation_counter);
-		enc_accum = 0;
-	} else if (enc_accum <= -4) {
-		atomic_dec(&rotation_counter);
-		enc_accum = 0;
+	bool p0 = (old_state >> 1) & 1;
+	bool p1 = old_state & 1;
+	bool e0 = (new_state >> 1) & 1;
+	bool e1 = new_state & 1;
+
+	/*
+	 * Port of GyverLibs EncButton VirtEncoder::pollEnc(), configured as
+	 * EB_STEP4_LOW. For pull-up encoders this emits one step at idle 11.
+	 */
+	if (!(p0 ^ p1 ^ e0 ^ e1)) {
+		atomic_inc(&invalid_counter);
+		return;
+	}
+
+	(p1 ^ e0) ? ++enc_accum : --enc_accum;
+	enc_state = new_state;
+	atomic_inc(&transition_counter);
+	atomic_inc(&state_counter[new_state & 0x03]);
+
+	if (!enc_accum) {
+		return;
+	}
+
+	/* EB_STEP4_LOW: skip 01, 10, 00; emit only when both lines are high. */
+	if (!(e0 && e1)) {
+		return;
+	}
+
+	int8_t step = ((enc_accum > 0) ^ ENCODER_REVERSE) ? -1 : 1;
+	atomic_add(&rotation_counter, step);
+	if (step > 0) {
+		atomic_inc(&synth_counter);
+	} else {
+		atomic_inc(&same_counter);
+	}
+	enc_accum = 0;
+}
+
+static void process_button_state(bool raw_pressed)
+{
+	int64_t now = k_uptime_get();
+
+	if (raw_pressed != btn_raw) {
+		btn_raw = raw_pressed;
+		btn_debouncing = true;
+		btn_debounce_ms = now;
+	}
+
+	if (btn_debouncing) {
+		if ((now - btn_debounce_ms) < ENC_BTN_DEBOUNCE_MS) {
+			return;
+		}
+		btn_debouncing = false;
+		if (btn_state == btn_raw) {
+			return;
+		}
+
+		btn_state = btn_raw;
+		if (btn_state) {
+			btn_press_ms = now;
+			btn_hold_sent = false;
+			btn_long_hold_sent = false;
+		} else {
+			if (!btn_hold_sent) {
+				if (btn_last_click_ms > 0 &&
+				    (now - btn_last_click_ms) <= ENC_BTN_CLICK_MS) {
+					atomic_or(&button_events, ENC_EVT_DOUBLE);
+					btn_last_click_ms = 0;
+				} else {
+					atomic_or(&button_events, ENC_EVT_CLICK);
+					btn_last_click_ms = now;
+				}
+			} else {
+				btn_last_click_ms = 0;
+			}
+			btn_press_ms = 0;
+		}
+	}
+
+	if (btn_state && !btn_hold_sent &&
+	    (now - btn_press_ms) >= ENC_BTN_HOLD_MS) {
+		atomic_or(&button_events, ENC_EVT_HOLD);
+		btn_hold_sent = true;
+		btn_last_click_ms = 0;
+	}
+
+	if (btn_state && !btn_long_hold_sent &&
+	    (now - btn_press_ms) >= ENC_BTN_LONG_HOLD_MS) {
+		atomic_or(&button_events, ENC_EVT_LONG_HOLD);
+		btn_long_hold_sent = true;
 	}
 }
 
-/* ─── Button ISR ─────────────────────────────────────────────────────────── */
-
-static void sw_isr(const struct device *dev, struct gpio_callback *cb,
-		    uint32_t pins)
+static void encoder_thread(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(pins);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
 
-	uint32_t now = k_cycle_get_32();
-	uint32_t elapsed_us = k_cyc_to_us_floor32(now - last_sw_us);
-	if (elapsed_us < 50000) {  /* 50ms debounce */
-		return;
+	while (1) {
+		if (encoder_ready) {
+			process_ab_state(read_ab_state());
+			process_button_state(gpio_pin_get_dt(&enc_sw));
+		}
+		k_msleep(CONFIG_APP_ENCODER_POLL_INTERVAL_MS);
 	}
-	last_sw_us = now;
-
-	/* Only on press (active = logical 1 for active-low with pull-up) */
-	if (!gpio_pin_get_dt(&enc_sw)) {
-		return;
-	}
-
-	int64_t now_ms = k_uptime_get();
-	atomic_set(&prev_press_ms, atomic_get(&press_time_ms));
-	atomic_set(&press_time_ms, (atomic_val_t)now_ms);
 }
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
 
 void encoder_init(void)
 {
+	encoder_ready = false;
+
 	/* CLK */
 	if (!gpio_is_ready_dt(&enc_clk)) {
 		LOG_ERR("Encoder CLK GPIO not ready");
 		return;
 	}
 	gpio_pin_configure_dt(&enc_clk, GPIO_INPUT);
-	gpio_pin_interrupt_configure_dt(&enc_clk, GPIO_INT_EDGE_BOTH);
-	gpio_init_callback(&clk_cb_data, clk_isr, BIT(enc_clk.pin));
-	gpio_add_callback(enc_clk.port, &clk_cb_data);
 
-	/* DT — input only, read in CLK ISR */
+	/* DT */
 	if (!gpio_is_ready_dt(&enc_dt)) {
 		LOG_ERR("Encoder DT GPIO not ready");
 		return;
@@ -139,15 +204,76 @@ void encoder_init(void)
 		return;
 	}
 	gpio_pin_configure_dt(&enc_sw, GPIO_INPUT);
-	gpio_pin_interrupt_configure_dt(&enc_sw, GPIO_INT_EDGE_BOTH);
-	gpio_init_callback(&sw_cb_data, sw_isr, BIT(enc_sw.pin));
-	gpio_add_callback(enc_sw.port, &sw_cb_data);
 
 	/* Read initial quadrature state */
-	enc_state = ((uint8_t)gpio_pin_get_dt(&enc_clk) << 1) |
-		    (uint8_t)gpio_pin_get_dt(&enc_dt);
+	enc_state = read_ab_state();
+	enc_accum = 0;
+	atomic_set(&rotation_counter, 0);
+	atomic_set(&button_events, 0);
+	atomic_set(&transition_counter, 0);
+	atomic_set(&invalid_counter, 0);
+	atomic_set(&same_counter, 0);
+	atomic_set(&synth_counter, 0);
+	for (int i = 0; i < 4; i++) {
+		atomic_set(&state_counter[i], 0);
+	}
+	btn_raw = gpio_pin_get_dt(&enc_sw);
+	btn_state = btn_raw;
+	btn_debouncing = false;
+	btn_hold_sent = false;
+	btn_debounce_ms = k_uptime_get();
+	btn_press_ms = btn_state ? btn_debounce_ms : 0;
+	btn_last_click_ms = 0;
 
+	encoder_ready = true;
+	k_thread_create(&encoder_thread_data, encoder_stack,
+			K_THREAD_STACK_SIZEOF(encoder_stack),
+			encoder_thread, NULL, NULL, NULL,
+			CONFIG_APP_ENCODER_PRIORITY, 0, K_NO_WAIT);
+	k_thread_name_set(&encoder_thread_data, "encoder");
 	LOG_INF("Encoder init OK (CLK=GP22, DT=GP12, SW=GP19)");
+}
+
+bool encoder_get_debug(int *clk, int *dt, int *sw, int *pending_rotation,
+		       int *transition_count, int *invalid_count, int *same_count,
+		       int *synth_count, int *accum, int state_counts[4])
+{
+	if (!encoder_ready) {
+		return false;
+	}
+	if (clk) {
+		*clk = gpio_pin_get_dt(&enc_clk);
+	}
+	if (dt) {
+		*dt = gpio_pin_get_dt(&enc_dt);
+	}
+	if (sw) {
+		*sw = gpio_pin_get_dt(&enc_sw);
+	}
+	if (pending_rotation) {
+		*pending_rotation = (int)atomic_get(&rotation_counter);
+	}
+	if (transition_count) {
+		*transition_count = (int)atomic_get(&transition_counter);
+	}
+	if (invalid_count) {
+		*invalid_count = (int)atomic_get(&invalid_counter);
+	}
+	if (same_count) {
+		*same_count = (int)atomic_get(&same_counter);
+	}
+	if (synth_count) {
+		*synth_count = (int)atomic_get(&synth_counter);
+	}
+	if (accum) {
+		*accum = enc_accum;
+	}
+	if (state_counts) {
+		for (int i = 0; i < 4; i++) {
+			state_counts[i] = (int)atomic_get(&state_counter[i]);
+		}
+	}
+	return true;
 }
 
 uint8_t encoder_poll(int *rotation)
@@ -166,33 +292,7 @@ uint8_t encoder_poll(int *rotation)
 		events |= ENC_EVT_FAST;
 	}
 
-	/* Button events — classify from timestamps */
-	int64_t now = k_uptime_get();
-	int64_t pt = (int64_t)atomic_get(&press_time_ms);
-	int64_t pp = (int64_t)atomic_get(&prev_press_ms);
-
-	if (pt > 0) {
-		int64_t since = now - pt;
-
-		/* Hold: button pressed > 800ms ago and still held */
-		if (since > 800 && gpio_pin_get_dt(&enc_sw)) {
-			events |= ENC_EVT_HOLD;
-			atomic_set(&press_time_ms, 0);
-			atomic_set(&prev_press_ms, 0);
-		}
-		/* Double-click: two presses within 400ms */
-		else if (pp > 0 && (pt - pp) < 400 && (pt - pp) > 30) {
-			events |= ENC_EVT_DOUBLE;
-			atomic_set(&press_time_ms, 0);
-			atomic_set(&prev_press_ms, 0);
-		}
-		/* Single click: 400ms elapsed since last press, no second press */
-		else if (since > 400 && since < 800) {
-			events |= ENC_EVT_CLICK;
-			atomic_set(&press_time_ms, 0);
-			atomic_set(&prev_press_ms, 0);
-		}
-	}
+	events |= (uint8_t)atomic_set(&button_events, 0);
 
 	return events;
 }

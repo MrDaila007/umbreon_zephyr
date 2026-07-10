@@ -3,10 +3,11 @@ CFLAGS  := -Wall -Wextra -std=c99 -g -O0 -I.
 LDFLAGS := -lm
 
 # Zephyr workspace
+PROJECT_ROOT  := $(abspath ..)
 ZEPHYR_VENV   ?= $(HOME)/zephyrproject-v4.4/.venv/bin/activate
 ZEPHYR_BASE   ?= $(HOME)/zephyrproject-v4.4/zephyr
 ZTEST_SRC     := ztest
-ZTEST_BUILD   := /tmp/umbreon_ztest
+ZTEST_BUILD   ?= $(PROJECT_ROOT)/build/ztest
 ZTEST_BOARD   := native_sim
 
 .PHONY: all test test-host test-ztest clean clean-ztest
@@ -33,9 +34,10 @@ test-host: test_unit test_maneuver
 # ── Zephyr ztest (native_sim) ────────────────────────────────────────────────
 test-ztest:
 	@echo "══ Zephyr ztest ($(ZTEST_BOARD)) ══"
+	@rm -rf $(ZTEST_BUILD)
 	@. $(ZEPHYR_VENV) && \
 		ZEPHYR_BASE=$(ZEPHYR_BASE) \
-		west build -b $(ZTEST_BOARD) -d $(ZTEST_BUILD) $(ZTEST_SRC) 2>&1 | tail -3
+		west build -b $(ZTEST_BOARD) -d $(ZTEST_BUILD) --pristine always $(ZTEST_SRC)
 	@$(ZTEST_BUILD)/zephyr/zephyr.exe
 
 # ── Clean ─────────────────────────────────────────────────────────────────────

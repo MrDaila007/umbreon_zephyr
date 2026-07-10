@@ -10,19 +10,30 @@ Targets Zephyr v4.4 (recommended) for RP2350 (Raspberry Pi Pico 2).
 | 6x VL53L0X ToF | I2C1 100kHz | SDA=GP2, SCL=GP3, XSHUT=GP6-9,14,15 |
 | MPU-6050 IMU | I2C0 400kHz | SDA=GP0, SCL=GP1 |
 | ESP8266 WiFi | UART1 115200 | TX=GP4, RX=GP5 |
-| Debug console | UART0 115200 | TX=GP16, RX=GP17 |
+| Debug console / commands | UART0 115200 | TX=GP16, RX=GP17 |
 | Servo (steering) | PWM slice 5A | GP10 |
 | ESC (motor) | PWM slice 5B | GP11 |
 | Tachometer | GPIO IRQ RISING | GP13 |
+| Piezo buzzer | GPIO square wave | GP18 |
 | Battery | ADC ch0 | GP26 (18k/10k divider) |
+| OLED SSD1306 128x64 | I2C0 400kHz | SDA=GP0, SCL=GP1, addr=0x3C |
+| Menu encoder | GPIO active low | CLK=GP22, DT=GP12, button=GP19 |
 
 ### Sensor Layout
 
-```
-        [1:FR]  [4:FL]
-  [0:HR]                [5:HL]
-        [2:R]   [3:L]
-      ────── FRONT ──────
+```text
+             REAR
+
+      [0 HR]           [5 HL]
+      Hard-Right       Hard-Left
+
+          [1 FR]   [4 FL]
+          Front-R  Front-L
+
+          [2 R]    [3 L]
+          Right    Left
+
+            FRONT
 ```
 
 ## Getting Started (from scratch)
@@ -41,6 +52,7 @@ This will:
 2. Download and install [Zephyr SDK 1.0](https://github.com/zephyrproject-rtos/sdk-ng) with ARM toolchain
 3. Initialize Zephyr v4.4 workspace at `~/zephyrproject-v4.4`
 4. Create Python venv and install all dependencies
+5. Clone u8g2 C sources into `modules/u8g2`
 
 Run `./setup_zephyr.sh --help` for all options.
 
@@ -75,7 +87,16 @@ cd ~/zephyrproject-v4.4
 west update --narrow -o=--depth=1
 ```
 
-#### 4. Python venv
+#### 4. u8g2 sources
+
+```bash
+git init modules/u8g2
+git -C modules/u8g2 remote add origin https://github.com/olikraus/u8g2.git
+git -C modules/u8g2 fetch --depth 1 origin cbceaa1cab22ad63e41c2df684e173cd5433766e
+git -C modules/u8g2 checkout --detach FETCH_HEAD
+```
+
+#### 5. Python venv
 
 ```bash
 python3 -m venv ~/zephyrproject-v4.4/.venv
@@ -114,7 +135,7 @@ Or manually:
 
 ```bash
 cd ~/zephyrproject-v4.4 && source .venv/bin/activate
-west build -b rpi_pico2/rp2350a/m33 --pristine always /path/to/umbreon_zephyr
+west build -b rpi_pico2/rp2350a/m33 -d /path/to/umbreon_zephyr/build --pristine always /path/to/umbreon_zephyr
 ```
 
 ### Flash
@@ -193,6 +214,42 @@ Dashboard endpoint selection:
 - connect dashboard to `127.0.0.1:8023` for real stream
 - connect dashboard to `127.0.0.1:8123` for sim stream (or use second dashboard instance)
 
+### HIL health tests on real hardware
+
+`tools/hil_runner.py` drives the firmware command UART and fails with non-zero
+exit if it sees reboot/fault markers, timestamp rollback, too many telemetry
+gaps, low battery, or impossible tachometer speed spikes.
+
+Safe smoke test (no motor):
+
+```bash
+make hil-smoke PROBE_UART=/dev/ttyACM0
+```
+
+Five-minute RUN endurance test:
+
+```bash
+make hil-endurance PROBE_UART=/dev/ttyACM0 HIL_DURATION=300
+```
+
+Bench motor test (wheels must be lifted):
+
+```bash
+make hil-motor PROBE_UART=/dev/ttyACM0
+```
+
+Logs are written to `/tmp` by default:
+
+- `/tmp/umbreon_hil_smoke.log`, `/tmp/umbreon_hil_smoke.json`
+- `/tmp/umbreon_hil_endurance.log`, `/tmp/umbreon_hil_endurance.json`
+- `/tmp/umbreon_hil_motor.log`, `/tmp/umbreon_hil_motor.json`
+
+Useful overrides:
+
+```bash
+make hil-endurance HIL_LOG_DIR=./hil-logs HIL_TGF=500 HIL_DURATION=600
+```
+
 ### Monitor serial console
 
 ```bash
@@ -207,14 +264,67 @@ make test-host              # host unit tests only (no hardware)
 make test-ztest             # Zephyr ztest on native_sim
 ```
 
+### Check display UI
+
+On boot, the OLED shows a splash screen (team logo, firmware version, status) for
+2.5 seconds (`CONFIG_APP_BOOTSCREEN`, `CONFIG_APP_BOOTSCREEN_DURATION_MS`), then the
+dashboard. Disable with `CONFIG_APP_BOOTSCREEN=n` in `prj.conf`.
+
+Firmware version shown on the boot splash and Info screen comes from
+`src/version.h`. The built firmware appends the current Git commit, for example
+`2.0.1 (e4c0dab)`, so the car's menu shows exactly which commit is running.
+An asterisk after the hash, for example `2.0.1 (e4c0dab*)`, means the firmware
+was built from a dirty worktree.
+
+Install the repository hook once to bump the patch version automatically before
+each commit:
+
+```bash
+make install-hooks
+```
+
+Manual version controls are still available:
+
+```bash
+make version-patch            # 2.0.0 -> 2.0.1
+make version-minor            # 2.0.1 -> 2.1.0
+make version-major            # 2.1.0 -> 3.0.0
+make version-bump VERSION=2.2.0
+make version-show
+```
+
+Renders the 128×64 dashboard at 4× scale using the project's own BDF fonts
+and checks every pixel for zone overlaps. The source-screen pass also compiles
+the real `src/screens/*.c` files against a small host stub harness, then checks
+the actual `screen_*_draw()` output for blank frames, out-of-bounds draw calls,
+and overlaps.
+
+Saves `tools/sim_dashboard.png` for the legacy dashboard scenarios and
+`tools/sim_screens.png` for the source-screen render grid.
+
+```bash
+make check-ui               # requires: pip install pillow
+make check-ui-dashboard     # legacy dashboard scenarios only
+make check-ui-screens       # real src/screens/*.c draw functions
+```
+
+Intentional overlaps (tick marks crossing the IMU baseline) are whitelisted and
+shown in yellow. Real overlaps are red and block CI.
+
 ### Makefile targets reference
 
 | Target | Description |
 |--------|-------------|
 | `make setup` | Run `setup_zephyr.sh` (full environment setup) |
+| `make install-hooks` | Enable the pre-commit firmware version bump hook |
 | `make build` | Build firmware (UART console) |
 | `make build-usb` | Build firmware (USB console) |
 | `make build-hil` | Build for bare HIL (IMU/VL53 disabled) |
+| `make version-patch` | Bump firmware patch version in `src/version.h` |
+| `make version-minor` | Bump firmware minor version in `src/version.h` |
+| `make version-major` | Bump firmware major version in `src/version.h` |
+| `make version-bump VERSION=x.y.z` | Set an explicit firmware version |
+| `make version-show` | Print the current firmware version |
 | `make flash` | Copy UF2 to Pico 2 in BOOTSEL mode |
 | `make flash-stlink` | Flash ELF via ST-Link/OpenOCD |
 | `make monitor` | Serial console (picocom) |
@@ -227,6 +337,10 @@ make test-ztest             # Zephyr ztest on native_sim
 | `make hil-real` | Run bridge: dashboard <-> UART (RP2350) |
 | `make hil-sim` | Run sim + bridge endpoint for dashboard |
 | `make hil-dual` | Run real + sim endpoints in one bridge process |
+| `make hil-smoke` | Safe real-hardware command/telemetry smoke test |
+| `make hil-endurance` | RUN endurance test with reboot/fault detection |
+| `make hil-motor` | Bench motor HIL test (requires lifted wheels) |
+| `make check-ui` | Run both display UI checkers; saves `tools/sim_dashboard.png` and `tools/sim_screens.png` |
 
 ## Architecture
 
@@ -235,8 +349,9 @@ make test-ztest             # Zephyr ztest on native_sim
 | Thread | Priority | Stack | Period | Purpose |
 |--------|----------|-------|--------|---------|
 | control | 2 | 4096B | 40ms | Sensors, PID, steering, detection |
-| wifi_cmd | 5 | 2048B | event | UART command parsing |
-| battery | 10 | 1024B | 500ms | Battery ADC monitoring |
+| display | 3 | 4096B | 120ms | SSD1306 screen rendering (dashboard, menu, settings, info, WiFi) |
+| wifi_cmd | 5 | 2048B | event | UART command parsing, WiFi status polling |
+| battery | 10 | 1024B | 50ms default | Battery ADC monitoring |
 | main | — | 4096B | — | Init, then sleeps forever |
 | Tachometer ISR | ISR | — | edge | Pulse counting |
 
@@ -250,15 +365,27 @@ make test-ztest             # Zephyr ztest on native_sim
 | `imu.c/h` | MPU-6050 gyro Z, calibration, heading integration |
 | `tachometer.c/h` | GPIO ISR, speed calculation |
 | `control.c/h` | Main control loop: wall-follow, stuck detection |
-| `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge) |
+| `wifi_cmd.c/h` | UART1 command protocol (ESP8266 WiFi bridge), WiFi status state |
+| `wifi_cipher.h` | Shared XOR+hex cipher for Pico↔ESP credential exchange |
 | `settings.c/h` | NVS storage for 31 configurable parameters |
 | `battery.c/h` | ADC monitoring, low-voltage cutoff |
 | `tests.c/h` | 8 diagnostic test routines |
 | `track_learn.c/h` | Track profile recording and race replay |
+| `display.c/h` | Display thread, screen state machine (dashboard / menu) |
+| `display_hal.c/h` | u8g2 HAL — Zephyr I2C0 to SSD1306 |
+| `screens/screen_boot.c` | Boot splash: logo (XBM), firmware version, status line |
+| `assets/umbreon_logo.c` | Monochrome logo bitmap for boot screen |
+| `screens/screen_dashboard.c` | Main dashboard: battery, sensor bars, IMU scale, WiFi strip |
+| `screens/screen_info.c` | Info screen: firmware version, sensor status |
+| `screens/screen_wifi.c` | WiFi status screen: mode, SSID, IP, RSSI, connection status |
 
 ## WiFi Protocol
 
 All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, terminated with `\n`.
+
+The internal Pico↔ESP bridge protocol (`#WIFISTATUS` polling, `$WIFICFG` credential
+provisioning, XOR+hex cipher) is documented in
+[docs/wifi-protocol.md](docs/wifi-protocol.md#internal-bridge-protocol-pico--esp).
 
 ### Control
 
@@ -294,6 +421,7 @@ All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, 
 | Command | Description |
 |---------|-------------|
 | `$BAT` | Battery voltage |
+| `$BEEP` / `$BEEP:freq,ms` | Piezo buzzer test on GP18 |
 | `$TEST:name` | Run test (lidar, servo, taho, esc, speed, autotune, **pidtune**, reactive, cal) |
 | `$DIAG` | Overall system diagnostics |
 | `$SNS` | Raw sensor readings |
@@ -302,6 +430,7 @@ All commands are ASCII over UART1 (ESP8266 bridge, GP4/GP5), prefixed with `$`, 
 | `$SYS` | System info (uptime, settings) |
 | `$LOG:ON/OFF` | Toggle debug log forwarding (`$L:...` prefix) |
 | `$HELP` | List all available commands |
+| `$WIFICFG:ACK` / `$WIFICFG:NAK` | ESP acknowledges credential update (internal) |
 
 ### Track Learning
 
@@ -335,10 +464,13 @@ Authoritative defaults and new keys are in **`src/settings.c`** and
 | LMS | Loop period (ms) | 40 |
 | SPD1 / SPD2 | Cruise speeds (m/s) | ~0.48 / 0.32 |
 | SLW | Setpoint slew (m/s per s; 0=off) | 0.85 |
-| KOP / KOM | Start kick % / ms (KOP 0=off) | 18 / 300 |
+| KOP / KOM / CKU | Start kick %, duration, steering-load extra µs | 18 / 300 / 30 |
 | COE1/COE2 | Steering gain clear/blocked | 0.28 / 0.65 |
-| WDD / RCW / STK / IMR / SVR / CAL | Navigation & hardware flags | see `settings.c` |
+| RBC/RDC/RBM/RDM | Short reverse escape command/timing | see `settings.c` |
+| LBM/LDM/LFS/LFM | Wrong-direction recovery reverse/forward timing | see `settings.c` |
+| WDD / RCW / STK / STL / IMR / SVR / CAL | Navigation & hardware flags | see `settings.c` |
 | BEN / BML / BLV | Battery monitor / scale / low (V) | 0 / 4.85 / 6.0 |
+| TGF | Tachometer glitch filter (µs) | 500 |
 
 ## TODO
 

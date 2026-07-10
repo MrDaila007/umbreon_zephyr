@@ -7,6 +7,7 @@
 #include "car.h"
 #include "settings.h"
 #include "tachometer.h"
+#include "buzzer.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -23,6 +24,8 @@ LOG_MODULE_REGISTER(car, LOG_LEVEL_INF);
 /* ─── PWM devices ─────────────────────────────────────────────────────────── */
 static const struct pwm_dt_spec servo_pwm = PWM_DT_SPEC_GET(DT_NODELABEL(servo));
 static const struct pwm_dt_spec esc_pwm   = PWM_DT_SPEC_GET(DT_NODELABEL(esc));
+static volatile int esc_last_us = NEUTRAL_SPEED;
+static volatile int steer_last_cmd;
 
 /* ─── PID state ───────────────────────────────────────────────────────────── */
 static float target_speed;
@@ -46,6 +49,7 @@ static inline void servo_set_us(int us)
 
 static inline void esc_set_us(int us)
 {
+	esc_last_us = us;
 	pwm_set_pulse_dt(&esc_pwm, PWM_USEC(us));
 }
 
@@ -85,6 +89,7 @@ void car_write_steer(int s)
 		s = -s;
 	}
 	s = CLAMP(s, -1000, 1000);
+	steer_last_cmd = s;
 
 	int angle;
 	if (s < 0) {
@@ -137,6 +142,11 @@ void car_write_speed(int s)
 void car_write_speed_ms(float target)
 {
 	target_speed = target;
+}
+
+int car_get_esc_us(void)
+{
+	return esc_last_us;
 }
 
 /* ─── PID ─────────────────────────────────────────────────────────────────── */
@@ -203,7 +213,7 @@ void car_pid_control(void)
 		pid_ref_applied = target_speed;
 	}
 
-	/* Kick-off pulse: % of (max−min) ESC span for kick_ms after forward edge from rest */
+	/* Kick-off pulse: % of forward ESC span for kick_ms after forward edge from rest */
 	bool want_fwd = pid_ref_applied > 0.02f;
 	bool had_fwd = kick_prev_pid_ref > 0.02f;
 	if (!want_fwd) {
@@ -230,18 +240,27 @@ void car_pid_control(void)
 	float output = ff + c.pid_kp * error + c.pid_ki * pid_integral + c.pid_kd * deriv;
 
 	float kick_us = 0.0f;
+	int corner_kick_us = 0;
 	if (c.kick_pct > 0.05f && want_fwd && now_ms < kick_until_ms) {
-		int span = c.max_speed - c.min_speed;
+		int span = c.max_speed - NEUTRAL_SPEED;
 		if (span < 1) {
 			span = 1;
 		}
 		kick_us = (c.kick_pct / 100.0f) * (float)span;
-		if (kick_us > 40.0f) {
-			kick_us = 40.0f;
+		if (kick_us > 60.0f) {
+			kick_us = 60.0f;
 		}
 	}
+	if (want_fwd && pid_filtered < 0.12f) {
+		int steer_abs = steer_last_cmd < 0 ? -steer_last_cmd : steer_last_cmd;
+		corner_kick_us = (steer_abs * c.corner_kick_us) / 1000;
+	}
 
-	int esc_val = NEUTRAL_SPEED + (int)(output + kick_us);
+	int esc_val = NEUTRAL_SPEED + (int)(output + kick_us) + corner_kick_us;
+	if (want_fwd && pid_filtered < 0.12f) {
+		int launch_floor = c.min_speed + (int)kick_us + corner_kick_us;
+		esc_val = MAX(esc_val, launch_floor);
+	}
 	esc_val = CLAMP(esc_val, NEUTRAL_SPEED, c.max_speed);
 	esc_set_us(esc_val);
 }
@@ -279,5 +298,6 @@ void car_run_calibration(void)
 
 	wifi_cmd_send("$T:CAL,phase=done\n");
 	wifi_cmd_send("$TDONE:cal\n");
+	buzzer_play(BUZZER_CAL_DONE);
 	LOG_INF("ESC calibration complete");
 }

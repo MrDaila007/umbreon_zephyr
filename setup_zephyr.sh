@@ -16,6 +16,7 @@ ZEPHYR_VERSION="v4.4.0"
 ZEPHYR_SDK_VERSION="1.0.0"
 ZEPHYR_SDK_INSTALL_DIR="${HOME}/zephyr-sdk-${ZEPHYR_SDK_VERSION}"
 ZEPHYR_DIR="${HOME}/zephyrproject-v4.4"
+U8G2_REVISION="cbceaa1cab22ad63e41c2df684e173cd5433766e"
 
 ZEPHYR_PATCH_URL="https://github.com/zephyrproject-rtos/zephyr/commit/5d36e85b99a.patch"
 HAL_PATCH_URL="https://github.com/zephyrproject-rtos/hal_rpi_pico/commit/5d7744c.patch"
@@ -49,7 +50,8 @@ What this script does:
   2. Installs Zephyr SDK ${ZEPHYR_SDK_VERSION} with ARM toolchain
   3. Initializes a Zephyr workspace (west init + west update)
   4. Creates Python venv and installs dependencies
-  5. Applies RP2350 flash patches (only if Zephyr < v4.3)
+  5. Installs external application sources (u8g2)
+  6. Applies RP2350 flash patches (only if Zephyr < v4.3)
 HELP
             exit 0
             ;;
@@ -155,7 +157,29 @@ setup_venv() {
     pip install --quiet -r "${ZEPHYR_DIR}/zephyr/scripts/requirements.txt"
 }
 
-# ── Step 5: RP2350 flash patches ────────────────────────────────────────────
+# ── Step 5: External application sources ─────────────────────────────────────
+install_app_deps() {
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    local u8g2_dir="${script_dir}/modules/u8g2"
+
+    if [ -f "${u8g2_dir}/csrc/u8g2.h" ]; then
+        info "u8g2 sources already present at ${u8g2_dir}"
+        return
+    fi
+
+    if [ -e "${u8g2_dir}" ]; then
+        error "Found ${u8g2_dir}, but csrc/u8g2.h is missing"
+    fi
+
+    info "Cloning u8g2 sources into ${u8g2_dir}..."
+    git init "${u8g2_dir}"
+    git -C "${u8g2_dir}" remote add origin https://github.com/olikraus/u8g2.git
+    git -C "${u8g2_dir}" fetch --depth 1 origin "${U8G2_REVISION}"
+    git -C "${u8g2_dir}" checkout --detach FETCH_HEAD
+}
+
+# ── Step 6: RP2350 flash patches ────────────────────────────────────────────
 apply_patches() {
     if ! needs_patches; then
         info "Zephyr ${ZEPHYR_VERSION} includes RP2350 flash support, no patches needed"
@@ -213,6 +237,7 @@ fi
 
 init_workspace
 setup_venv
+install_app_deps
 apply_patches
 
 # ── Summary ──────────────────────────────────────────────────────────────────
@@ -227,7 +252,7 @@ info "SDK       : ${ZEPHYR_SDK_INSTALL_DIR}"
 echo ""
 echo "Build firmware:"
 echo "  cd ${ZEPHYR_DIR} && source .venv/bin/activate"
-echo "  west build -b rpi_pico2/rp2350a/m33 --pristine always ${SCRIPT_DIR}"
+echo "  west build -b rpi_pico2/rp2350a/m33 -d ${SCRIPT_DIR}/build --pristine always ${SCRIPT_DIR}"
 echo ""
 echo "Or use make:"
 echo "  cd ${SCRIPT_DIR}"

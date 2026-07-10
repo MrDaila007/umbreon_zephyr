@@ -11,6 +11,9 @@
 #include "zephyr_stubs.h"
 #include "test_runner.h"
 
+/* wifi_cipher.h is a header-only library of static inline helpers */
+#include "../src/wifi_cipher.h"
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Extracted functions under test (copies of static inlines from src/)
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -741,6 +744,273 @@ TEST(test_stuck_sensor_confirmed_still_works)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: parse_wifi_status_line (copy from wifi_cmd.c)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static volatile bool test_ws_ready;
+static volatile bool test_ws_is_ap;
+static volatile int  test_ws_rssi;
+static char          test_ws_ssid[33];
+static char          test_ws_ip[16];
+
+static void test_parse_wifi_status_line(const char *line)
+{
+	const char *rest = line + 2;
+	if (strncmp(rest, "Mode:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		test_ws_is_ap = (strncmp(val, "AP", 2) == 0);
+	} else if (strncmp(rest, "RSSI:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		test_ws_rssi = atoi(val);
+	} else if (strncmp(rest, "Status:", 7) == 0) {
+		const char *val = rest + 7;
+		while (*val == ' ') val++;
+		test_ws_ready = (strncmp(val, "ready", 5) == 0);
+	} else if (strncmp(rest, "SSID:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		uint8_t enc[33], plain[33];
+		int n = cfg_from_hex(val, enc, sizeof(enc) - 1);
+		if (n > 0) {
+			cfg_xor(enc, plain, (size_t)n);
+			plain[n] = '\0';
+			memcpy(test_ws_ssid, plain, (size_t)n + 1);
+		}
+	} else if (strncmp(rest, "IP:", 3) == 0) {
+		const char *val = rest + 3;
+		while (*val == ' ') val++;
+		strncpy(test_ws_ip, val, sizeof(test_ws_ip) - 1);
+		test_ws_ip[sizeof(test_ws_ip) - 1] = '\0';
+	}
+}
+
+/* From screen_dashboard.c — copy of rssi_to_bars */
+static int test_rssi_to_bars(int rssi)
+{
+	if (rssi >= -60) return 4;
+	if (rssi >= -70) return 3;
+	if (rssi >= -80) return 2;
+	if (rssi >= -90) return 1;
+	return 0;
+}
+
+TEST(test_wifi_parse_mode_sta)
+{
+	test_ws_is_ap = true;
+	test_parse_wifi_status_line("# Mode:  STA");
+	ASSERT_FALSE(test_ws_is_ap);
+}
+
+TEST(test_wifi_parse_mode_ap)
+{
+	test_ws_is_ap = false;
+	test_parse_wifi_status_line("# Mode:  AP");
+	ASSERT_TRUE(test_ws_is_ap);
+}
+
+TEST(test_wifi_parse_rssi_negative)
+{
+	test_ws_rssi = 0;
+	test_parse_wifi_status_line("# RSSI:  -65");
+	ASSERT_EQ(test_ws_rssi, -65);
+}
+
+TEST(test_wifi_parse_rssi_strong)
+{
+	test_ws_rssi = 0;
+	test_parse_wifi_status_line("# RSSI:  -42");
+	ASSERT_EQ(test_ws_rssi, -42);
+}
+
+TEST(test_wifi_parse_status_ready)
+{
+	test_ws_ready = false;
+	test_parse_wifi_status_line("# Status: ready");
+	ASSERT_TRUE(test_ws_ready);
+}
+
+TEST(test_wifi_parse_status_other)
+{
+	test_ws_ready = true;
+	test_parse_wifi_status_line("# Status: other");
+	ASSERT_FALSE(test_ws_ready);
+}
+
+TEST(test_wifi_parse_unknown_key_ignored)
+{
+	test_ws_ready = false;
+	test_ws_rssi  = -55;
+	test_ws_is_ap = true;
+	/* UNKNOWN: is a key that doesn't match any handler — state unchanged */
+	test_parse_wifi_status_line("# UNKNOWN: whatever");
+	ASSERT_FALSE(test_ws_ready);
+	ASSERT_EQ(test_ws_rssi, -55);
+	ASSERT_TRUE(test_ws_is_ap);
+}
+
+TEST(test_rssi_bars_excellent)
+{
+	ASSERT_EQ(test_rssi_to_bars(-55), 4);
+	ASSERT_EQ(test_rssi_to_bars(-60), 4);
+}
+
+TEST(test_rssi_bars_good)
+{
+	ASSERT_EQ(test_rssi_to_bars(-61), 3);
+	ASSERT_EQ(test_rssi_to_bars(-70), 3);
+}
+
+TEST(test_rssi_bars_fair)
+{
+	ASSERT_EQ(test_rssi_to_bars(-71), 2);
+	ASSERT_EQ(test_rssi_to_bars(-80), 2);
+}
+
+TEST(test_rssi_bars_poor)
+{
+	ASSERT_EQ(test_rssi_to_bars(-81), 1);
+	ASSERT_EQ(test_rssi_to_bars(-90), 1);
+}
+
+TEST(test_rssi_bars_none)
+{
+	ASSERT_EQ(test_rssi_to_bars(-91), 0);
+	ASSERT_EQ(test_rssi_to_bars(-100), 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: wifi_cipher (cfg_xor / cfg_to_hex / cfg_from_hex)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_cipher_xor_roundtrip)
+{
+	const char *plain = "MySSID\tMyPassword";
+	size_t n = strlen(plain);
+	uint8_t enc[64], dec[64];
+	cfg_xor((const uint8_t *)plain, enc, n);
+	cfg_xor(enc, dec, n);
+	dec[n] = '\0';
+	ASSERT_TRUE(memcmp(dec, plain, n) == 0);
+}
+
+TEST(test_cipher_hex_encode_decode_roundtrip)
+{
+	const uint8_t data[] = {0xA3, 0x00, 0xFF, 0x7F, 0x01};
+	char hex[16];
+	cfg_to_hex(data, sizeof(data), hex, sizeof(hex));
+	uint8_t out[5];
+	int n = cfg_from_hex(hex, out, sizeof(out));
+	ASSERT_EQ(n, 5);
+	ASSERT_TRUE(memcmp(out, data, 5) == 0);
+}
+
+TEST(test_cipher_full_cycle)
+{
+	/* Encode ssid+pass → hex, then decode → compare original */
+	const char *ssid = "RoboNet";
+	const char *pass  = "secret42";
+	char plain[100];
+	int n = snprintf(plain, sizeof(plain), "%s\t%s", ssid, pass);
+	uint8_t enc[100];
+	cfg_xor((const uint8_t *)plain, enc, (size_t)n);
+	char hex[200];
+	cfg_to_hex(enc, (size_t)n, hex, sizeof(hex));
+
+	/* Decode */
+	uint8_t enc2[100], plain2[101];
+	int m = cfg_from_hex(hex, enc2, sizeof(enc2));
+	ASSERT_EQ(m, n);
+	cfg_xor(enc2, plain2, (size_t)m);
+	plain2[m] = '\0';
+	ASSERT_TRUE(strcmp((char *)plain2, plain) == 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * IMU accessor logic (extracted static state + functions from imu.c)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static float _gyro_bias_test;
+static float _accel_bias_test[3];
+
+static float extracted_get_gyro_bias(void) { return _gyro_bias_test; }
+static void  extracted_get_accel_bias(float *x, float *y, float *z)
+{
+	*x = _accel_bias_test[0];
+	*y = _accel_bias_test[1];
+	*z = _accel_bias_test[2];
+}
+
+TEST(test_imu_gyro_bias_zero) {
+	_gyro_bias_test = 0.0f;
+	ASSERT_FLOAT_EQ(extracted_get_gyro_bias(), 0.0f, 1e-6f);
+}
+
+TEST(test_imu_gyro_bias_negative) {
+	_gyro_bias_test = -0.12f;
+	ASSERT_FLOAT_EQ(extracted_get_gyro_bias(), -0.12f, 1e-5f);
+}
+
+TEST(test_imu_accel_bias_zero) {
+	_accel_bias_test[0] = 0.0f;
+	_accel_bias_test[1] = 0.0f;
+	_accel_bias_test[2] = 0.0f;
+	float x, y, z;
+	extracted_get_accel_bias(&x, &y, &z);
+	ASSERT_FLOAT_EQ(x, 0.0f, 1e-6f);
+	ASSERT_FLOAT_EQ(y, 0.0f, 1e-6f);
+	ASSERT_FLOAT_EQ(z, 0.0f, 1e-6f);
+}
+
+TEST(test_imu_accel_bias_values) {
+	_accel_bias_test[0] =  0.10f;
+	_accel_bias_test[1] = -0.20f;
+	_accel_bias_test[2] =  9.81f;
+	float x, y, z;
+	extracted_get_accel_bias(&x, &y, &z);
+	ASSERT_FLOAT_EQ(x,  0.10f, 1e-5f);
+	ASSERT_FLOAT_EQ(y, -0.20f, 1e-5f);
+	ASSERT_FLOAT_EQ(z,  9.81f, 1e-4f);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Tests: parse_wifi_status_line — SSID cipher decode and IP
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+TEST(test_wifi_parse_ssid_cipher_roundtrip)
+{
+	/* Encrypt "HomeNet", hex-encode it, put it in a status line */
+	const char *ssid = "HomeNet";
+	size_t n = strlen(ssid);
+	uint8_t enc[33];
+	char hex[67];
+	cfg_xor((const uint8_t *)ssid, enc, n);
+	cfg_to_hex(enc, n, hex, sizeof(hex));
+
+	char line[128];
+	snprintf(line, sizeof(line), "# SSID: %s", hex);
+
+	memset(test_ws_ssid, 0, sizeof(test_ws_ssid));
+	test_parse_wifi_status_line(line);
+	ASSERT_TRUE(strcmp(test_ws_ssid, ssid) == 0);
+}
+
+TEST(test_wifi_parse_ip)
+{
+	memset(test_ws_ip, 0, sizeof(test_ws_ip));
+	test_parse_wifi_status_line("# IP: 192.168.1.42");
+	ASSERT_TRUE(strcmp(test_ws_ip, "192.168.1.42") == 0);
+}
+
+TEST(test_wifi_parse_ip_zeroes)
+{
+	memset(test_ws_ip, 0, sizeof(test_ws_ip));
+	test_parse_wifi_status_line("# IP: 0.0.0.0");
+	ASSERT_TRUE(strcmp(test_ws_ip, "0.0.0.0") == 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Main
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -824,6 +1094,38 @@ int main(void)
 	RUN_TEST(test_stall_disabled_when_zero);
 	RUN_TEST(test_stall_resets_on_speed_recovery);
 	RUN_TEST(test_stuck_sensor_confirmed_still_works);
+
+	printf("\n[parse_wifi_status_line]\n");
+	RUN_TEST(test_wifi_parse_mode_sta);
+	RUN_TEST(test_wifi_parse_mode_ap);
+	RUN_TEST(test_wifi_parse_rssi_negative);
+	RUN_TEST(test_wifi_parse_rssi_strong);
+	RUN_TEST(test_wifi_parse_status_ready);
+	RUN_TEST(test_wifi_parse_status_other);
+	RUN_TEST(test_wifi_parse_unknown_key_ignored);
+
+	printf("\n[rssi_to_bars]\n");
+	RUN_TEST(test_rssi_bars_excellent);
+	RUN_TEST(test_rssi_bars_good);
+	RUN_TEST(test_rssi_bars_fair);
+	RUN_TEST(test_rssi_bars_poor);
+	RUN_TEST(test_rssi_bars_none);
+
+	printf("\n[wifi_cipher]\n");
+	RUN_TEST(test_cipher_xor_roundtrip);
+	RUN_TEST(test_cipher_hex_encode_decode_roundtrip);
+	RUN_TEST(test_cipher_full_cycle);
+
+	printf("\n[parse_wifi_status_line — SSID+IP]\n");
+	RUN_TEST(test_wifi_parse_ssid_cipher_roundtrip);
+	RUN_TEST(test_wifi_parse_ip);
+	RUN_TEST(test_wifi_parse_ip_zeroes);
+
+	printf("\n--- IMU accessor ---\n");
+	RUN_TEST(test_imu_gyro_bias_zero);
+	RUN_TEST(test_imu_gyro_bias_negative);
+	RUN_TEST(test_imu_accel_bias_zero);
+	RUN_TEST(test_imu_accel_bias_values);
 
 	TEST_SUMMARY();
 }

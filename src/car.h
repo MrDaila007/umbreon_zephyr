@@ -24,6 +24,9 @@ void car_write_speed_ms(float target);
 /* Run PID control tick — call from control loop */
 void car_pid_control(void);
 
+/* Last ESC pulse command in microseconds. */
+int car_get_esc_us(void);
+
 /* PID state reset */
 void car_pid_reset(void);
 

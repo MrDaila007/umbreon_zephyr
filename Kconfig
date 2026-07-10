@@ -1,0 +1,237 @@
+source "Kconfig.zephyr"
+
+menu "Umbreon application"
+
+config APP_DISPLAY_DASHBOARD_ONLY
+	bool "Dashboard-only display mode"
+	default n
+	help
+	  When enabled, the display shows only the dashboard screen.
+	  The main menu, settings, tests and actions are inaccessible.
+	  Useful for competition builds where accidental menu entry must
+	  be prevented.
+
+config APP_BOOTSCREEN
+	bool "Show OLED boot splash"
+	default y
+	help
+	  On startup, show logo and firmware version for a fixed duration
+	  before switching to the dashboard.
+
+config APP_BOOTSCREEN_DURATION_MS
+	int "Boot splash duration in milliseconds"
+	depends on APP_BOOTSCREEN
+	default 2500
+	range 500 10000
+
+config APP_BUZZER
+	bool "Enable piezo buzzer on GP18"
+	default y
+	help
+	  Drive a small passive piezo buzzer connected to GP18 and GND.
+	  Sounds are queued and played by a low-priority thread.
+
+menu "Thread configuration"
+
+config APP_CONTROL_STACK_SIZE
+	int "Control thread stack size"
+	range 512 16384
+	default 4096
+
+config APP_CONTROL_PRIORITY
+	int "Control thread priority"
+	range 0 15
+	default 2
+
+config APP_WIFI_CMD_STACK_SIZE
+	int "WiFi command thread stack size"
+	range 512 16384
+	default 2048
+
+config APP_WIFI_CMD_PRIORITY
+	int "WiFi command thread priority"
+	range 0 15
+	default 5
+
+config APP_WIFI_ASYNC_STACK_SIZE
+	int "WiFi async worker stack size"
+	range 512 16384
+	default 3072
+
+config APP_WIFI_ASYNC_PRIORITY
+	int "WiFi async worker priority"
+	range 0 15
+	default 6
+
+config APP_DEBUG_UART_CMD
+	bool "UART0 debug command thread (GP16/GP17)"
+	default y
+	help
+	  Poll UART0 for the same $ commands accepted on the WiFi bridge.
+	  Intended for bench work with a USB-serial adapter or debug probe.
+	  Disable for race/track builds to save RAM, CPU, and UART0 bandwidth.
+
+config APP_DEBUG_UART_STACK_SIZE
+	int "Debug UART command thread stack size"
+	depends on APP_DEBUG_UART_CMD
+	range 512 16384
+	default 4096
+
+config APP_DEBUG_UART_PRIORITY
+	int "Debug UART command thread priority"
+	depends on APP_DEBUG_UART_CMD
+	range 0 15
+	default 7
+
+config APP_DISPLAY_STACK_SIZE
+	int "Display thread stack size"
+	range 512 16384
+	default 4096
+
+config APP_DISPLAY_PRIORITY
+	int "Display thread priority"
+	range 0 15
+	default 8
+
+config APP_ENCODER_STACK_SIZE
+	int "Encoder thread stack size"
+	range 512 16384
+	default 1024
+
+config APP_ENCODER_PRIORITY
+	int "Encoder thread priority"
+	range 0 15
+	default 5
+
+config APP_BUZZER_STACK_SIZE
+	int "Buzzer thread stack size"
+	depends on APP_BUZZER
+	range 512 4096
+	default 1024
+
+config APP_BUZZER_PRIORITY
+	int "Buzzer thread priority"
+	depends on APP_BUZZER
+	range 0 15
+	default 12
+
+config APP_BATTERY_STACK_SIZE
+	int "Battery thread stack size"
+	range 512 16384
+	default 1024
+
+config APP_BATTERY_PRIORITY
+	int "Battery thread priority"
+	range 0 15
+	default 10
+
+endmenu
+
+menu "Polling intervals"
+
+config APP_DISPLAY_REFRESH_INTERVAL_MS
+	int "Display dashboard refresh interval in milliseconds"
+	range 1 60000
+	default 120
+
+config APP_DISPLAY_MENU_INTERVAL_MS
+	int "Display menu refresh interval in milliseconds"
+	range 1 60000
+	default 50
+
+config APP_ENCODER_POLL_INTERVAL_MS
+	int "Encoder poll interval in milliseconds"
+	range 1 60000
+	default 1
+
+config APP_BATTERY_SAMPLE_INTERVAL_MS
+	int "Battery sample interval in milliseconds"
+	range 1 60000
+	default 50
+
+config APP_SENSOR_I2C_SCAN_INTERVAL_MS
+	int "Sensor I2C health scan interval in milliseconds"
+	range 0 60000
+	default 0
+	help
+	  Interval for explicit VL53L0X I2C address scans. 0 disables the scan.
+	  Normal RUN sensor polling still detects stale/erroring sensors; this
+	  scan is mainly a bench diagnostic and can create I2C NACK log noise if
+	  it probes absent addresses.
+
+config APP_SENSOR_I2C_SCAN_DEFAULT_ADDR
+	bool "Probe VL53L0X default address during I2C health scan"
+	depends on APP_SENSOR_I2C_SCAN_INTERVAL_MS > 0
+	default n
+	help
+	  Probe address 0x29 during the explicit health scan. In normal runtime
+	  all six VL53L0X devices are moved to 0x30..0x35, so probing 0x29 will
+	  usually NACK and may add avoidable I2C latency/log noise.
+
+config APP_VL53_I2C_BITRATE
+	int "VL53L0X I2C1 bus bitrate in Hz"
+	range 100000 1000000
+	default 400000
+	help
+	  I2C1 clock frequency for the six VL53L0X range sensors.
+	  Use 100000 for conservative wiring and fewer NACK/abort events.
+	  Use 400000 for lower RUN-loop latency only when wiring is stable.
+
+config APP_RUN_CSV_TELEMETRY_DIVIDER
+	int "RUN CSV telemetry divider"
+	range 0 1000
+	default 5
+	help
+	  Send CSV telemetry once every N control-loop ticks while RUN/manual
+	  driving is active. 0 disables periodic RUN CSV telemetry.
+
+config APP_CONTROL_INSTANT_TACHOMETER
+	bool "Use instant tachometer speed in control loop"
+	default y
+	help
+	  Use the last-pulse interval speed calculation for RUN control,
+	  stuck, stall, and maneuver stop checks. This matches the older
+	  Arduino-style behavior and avoids the mutex/EMA latency of the
+	  filtered tachometer speed path. Disable to use filtered speed in
+	  control decisions.
+
+config APP_RUN_PROFILING
+	bool "Emit RUN loop timing profiler telemetry"
+	default y
+	help
+	  Emit compact timing telemetry from the autonomous RUN loop. The
+	  profiler measures the main work() sections in microseconds and
+	  reports averages plus worst total tick time every configured number
+	  of RUN ticks.
+
+config APP_RUN_PROFILING_INTERVAL
+	int "RUN profiler report interval in ticks"
+	depends on APP_RUN_PROFILING
+	range 1 1000
+	default 25
+	help
+	  Number of autonomous RUN loop ticks to aggregate before emitting one
+	  $T:RUNPROF line. With the default 40 ms loop this reports once per
+	  second.
+
+config APP_RUN_PROFILING_CONSOLE
+	bool "Mirror RUN profiler telemetry to console"
+	depends on APP_RUN_PROFILING
+	default y
+	help
+	  Also print RUN profiler lines to the Zephyr console. This is intended
+	  for bench debugging over USB/UART0; keep it disabled for race builds
+	  if console output becomes measurable.
+
+config APP_WIFI_DEBUG_UART_MIRROR
+	bool "Mirror WiFi protocol TX to UART0 debug console"
+	depends on APP_DEBUG_UART_CMD
+	default n
+	help
+	  When enabled, every wifi_cmd_send()/wifi_cmd_printf() payload is also
+	  written synchronously to UART0. This is useful for bench debugging but
+	  can add milliseconds of latency to each RUN control-loop tick.
+
+endmenu
+
+endmenu

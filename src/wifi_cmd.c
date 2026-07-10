@@ -5,9 +5,10 @@
  *
  * Architecture:
  *   - UART1 (GP4/GP5) IRQ callback fills a ring buffer
+ *   - UART0 (GP16/GP17) polling RX accepts the same $ commands for debug
  *   - Dedicated thread wakes on '\n', parses command, dispatches
  *   - Commands that affect control loop are sent via k_msgq
- *   - UART0 (GP16/GP17) is free for debug console / LOG output
+ *   - UART0 (GP16/GP17) remains the debug console / LOG output
  *
  * Debug console commands ($LOG, $SNS, $IMU, $PID, $SYS, $DIAG, $HELP)
  */
@@ -21,8 +22,11 @@
 #include "battery.h"
 #include "control.h"
 #include "tests.h"
-#include "track_learn.h"
 #include "display.h"
+#include "display_hal.h"
+#include "encoder.h"
+#include "version.h"
+#include "buzzer.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -31,12 +35,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "wifi_cipher.h"
 #include <stdarg.h>
 
 LOG_MODULE_REGISTER(wifi_cmd, LOG_LEVEL_INF);
 
-/* ─── UART device ─────────────────────────────────────────────────────────── */
+/* ─── UART devices ────────────────────────────────────────────────────────── */
 static const struct device *uart_dev;
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
+static const struct device *debug_uart_dev;
+#endif
 
 /* ─── Ring buffer for UART RX ─────────────────────────────────────────────── */
 #define RX_BUF_SIZE 512
@@ -58,6 +66,7 @@ static uint8_t tx_buf[TX_BUF_SIZE];
 static volatile uint16_t tx_head;  /* written by threads (under mutex) */
 static volatile uint16_t tx_tail;  /* written by ISR only */
 static K_MUTEX_DEFINE(tx_mutex);
+static K_MUTEX_DEFINE(cfg_get_mutex);
 
 /* ─── TX overflow ring buffer (absorbs bursts when main ring is full) ───── */
 #define OVF_BUF_SIZE 512
@@ -68,11 +77,68 @@ static volatile uint16_t ovf_tail;  /* written by ISR only */
 /* ─── Debug log flag ──────────────────────────────────────────────────────── */
 static volatile bool log_on;
 
+/* ─── WiFi connection state (parsed from ESP #WIFISTATUS replies) ────────── */
+static volatile bool ws_ready;
+static volatile bool ws_is_ap;
+static volatile int  ws_rssi;
+static char ws_ssid[64];
+static char ws_ip[20];
+static char ws_ap_pass[64];
+
 /* ─── Thread ──────────────────────────────────────────────────────────────── */
-#define WIFI_STACK_SIZE 2048
-#define WIFI_PRIORITY   5
-static K_THREAD_STACK_DEFINE(wifi_stack, WIFI_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(wifi_stack, CONFIG_APP_WIFI_CMD_STACK_SIZE);
 static struct k_thread wifi_thread_data;
+
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
+static K_THREAD_STACK_DEFINE(debug_uart_stack, CONFIG_APP_DEBUG_UART_STACK_SIZE);
+static struct k_thread debug_uart_thread_data;
+#endif
+
+static K_MUTEX_DEFINE(debug_uart_tx_mutex);
+
+static void parse_wifi_status_line(const char *line)
+{
+	/* line format: "# Key:  value" (from wifi_manager_get_status on ESP) */
+	const char *rest = line + 2; /* skip leading "# " */
+	if (strncmp(rest, "Mode:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		ws_is_ap = (strncmp(val, "AP", 2) == 0);
+	} else if (strncmp(rest, "RSSI:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		ws_rssi = atoi(val);
+	} else if (strncmp(rest, "Status:", 7) == 0) {
+		const char *val = rest + 7;
+		while (*val == ' ') val++;
+		ws_ready = (strncmp(val, "ready", 5) == 0);
+	} else if (strncmp(rest, "SSID:", 5) == 0) {
+		const char *val = rest + 5;
+		while (*val == ' ') val++;
+		uint8_t raw[32];
+		int n = cfg_from_hex(val, raw, sizeof(raw));
+		if (n > 0) {
+			cfg_xor(raw, (uint8_t *)ws_ssid, n);
+			ws_ssid[n] = '\0';
+		}
+	} else if (strncmp(rest, "IP:", 3) == 0) {
+		const char *val = rest + 3;
+		while (*val == ' ') val++;
+		strncpy(ws_ip, val, sizeof(ws_ip) - 1);
+		ws_ip[sizeof(ws_ip) - 1] = '\0';
+	} else if (strncmp(rest, "AP Pass:", 8) == 0) {
+		const char *val = rest + 8;
+		while (*val == ' ') val++;
+		uint8_t raw[63];
+		int n = cfg_from_hex(val, raw, sizeof(raw));
+		if (n > 0) {
+			cfg_xor(raw, (uint8_t *)ws_ap_pass, n);
+			ws_ap_pass[n] = '\0';
+		}
+	}
+}
+
+static void dispatch_command(const char *line);
 
 /* After loading/resetting config, sync the tach glitch filter with the
  * (potentially changed) setting value. */
@@ -84,9 +150,7 @@ static void sync_tach_glitch_filter(void)
 }
 
 /* ─── Async command worker (long-running commands) ──────────────────────── */
-#define WIFI_ASYNC_STACK_SIZE 3072
-#define WIFI_ASYNC_PRIORITY   6
-static K_THREAD_STACK_DEFINE(wifi_async_stack, WIFI_ASYNC_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(wifi_async_stack, CONFIG_APP_WIFI_ASYNC_STACK_SIZE);
 static struct k_thread wifi_async_thread_data;
 
 enum async_cmd_kind {
@@ -154,8 +218,27 @@ static inline uint16_t tx_free(void)
 	return (t > h) ? (t - h - 1) : (TX_BUF_SIZE - h + t - 1);
 }
 
+#if IS_ENABLED(CONFIG_APP_WIFI_DEBUG_UART_MIRROR)
+static void debug_uart_send(const char *str)
+{
+	if (!debug_uart_dev) {
+		return;
+	}
+
+	k_mutex_lock(&debug_uart_tx_mutex, K_FOREVER);
+	for (const char *p = str; *p; p++) {
+		uart_poll_out(debug_uart_dev, (unsigned char)*p);
+	}
+	k_mutex_unlock(&debug_uart_tx_mutex);
+}
+#endif
+
 void wifi_cmd_send(const char *str)
 {
+#if IS_ENABLED(CONFIG_APP_WIFI_DEBUG_UART_MIRROR)
+	debug_uart_send(str);
+#endif
+
 	if (!uart_dev) {
 		return;
 	}
@@ -230,6 +313,40 @@ bool wifi_log_enabled(void)
 {
 	return log_on;
 }
+
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
+static void debug_uart_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	char line[CMD_BUF_SIZE];
+	int len = 0;
+
+	while (1) {
+		unsigned char c;
+		if (uart_poll_in(debug_uart_dev, &c) != 0) {
+			k_msleep(5);
+			continue;
+		}
+
+		if (c == '\n' || c == '\r') {
+			if (len > 0) {
+				line[len] = '\0';
+				if (line[0] == '$') {
+					dispatch_command(line);
+				}
+				len = 0;
+			}
+		} else if (len < (int)sizeof(line) - 1) {
+			line[len++] = (char)c;
+		} else {
+			len = 0;
+		}
+	}
+}
+#endif
 
 /* ─── Ring buffer helpers ─────────────────────────────────────────────────── */
 
@@ -348,12 +465,28 @@ static bool parse_set_pair(const char *pair)
 	else if (strcmp(key, "SLW")  == 0) cfg.spd_slew           = strtof(val, NULL);
 	else if (strcmp(key, "KOP")  == 0) cfg.kick_pct           = strtof(val, NULL);
 	else if (strcmp(key, "KOM")  == 0) cfg.kick_ms            = MAX(atoi(val), 0);
+	else if (strcmp(key, "CKU")  == 0) cfg.corner_kick_us     = CLAMP(atoi(val), 0, 120);
 	else if (strcmp(key, "COE1") == 0) cfg.coe_clear           = strtof(val, NULL);
 	else if (strcmp(key, "COE2") == 0) cfg.coe_blocked         = strtof(val, NULL);
 	else if (strcmp(key, "WDD")  == 0) cfg.wrong_dir_deg       = strtof(val, NULL);
 	else if (strcmp(key, "RCW")  == 0) cfg.race_cw             = atoi(val) != 0;
+	else if (strcmp(key, "WDT")  == 0) cfg.wrong_detect_mode   = CLAMP(atoi(val), 0, 1);
+	else if (strcmp(key, "WMT")  == 0) cfg.wrong_maneuver_mode = CLAMP(atoi(val), 0, 1);
+	else if (strcmp(key, "WST")  == 0) cfg.wrong_sensor_thresh = strtof(val, NULL);
 	else if (strcmp(key, "STK")  == 0) cfg.stuck_thresh        = MAX(atoi(val), 0);
 	else if (strcmp(key, "STL")  == 0) cfg.stall_thresh        = MAX(atoi(val), 0);
+	else if (strcmp(key, "RBC")  == 0) cfg.reverse_brake_cmd   = CLAMP(atoi(val), -1000, 0);
+	else if (strcmp(key, "RDC")  == 0) cfg.reverse_drive_cmd   = CLAMP(atoi(val), -1000, 0);
+	else if (strcmp(key, "RBM")  == 0) cfg.reverse_brake_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "RDM")  == 0) cfg.reverse_drive_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LBM")  == 0) cfg.long_reverse_brake_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LDM")  == 0) cfg.long_reverse_drive_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "LFS")  == 0) cfg.long_forward_speed_cap = strtof(val, NULL);
+	else if (strcmp(key, "LFM")  == 0) cfg.long_forward_ms    = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BSM")  == 0) cfg.burst_stop_ms      = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BPS")  == 0) cfg.burst_pre_steer_ms = CLAMP(atoi(val), 0, 5000);
+	else if (strcmp(key, "BFS")  == 0) cfg.burst_forward_speed = strtof(val, NULL);
+	else if (strcmp(key, "BFM")  == 0) cfg.burst_forward_ms   = CLAMP(atoi(val), 0, 5000);
 	else if (strcmp(key, "IMR")  == 0) cfg.imu_rotate          = atoi(val) != 0;
 	else if (strcmp(key, "SVR")  == 0) cfg.servo_reverse       = atoi(val) != 0;
 	else if (strcmp(key, "CAL")  == 0) cfg.calibrated          = atoi(val) != 0;
@@ -371,45 +504,53 @@ static bool parse_set_pair(const char *pair)
 static void cmd_get(void)
 {
 	struct car_settings c;
-	settings_get_copy(&c);
+	static char out[1024];
 
-	/* Chunk 1: thresholds + PID + ESC */
-	wifi_cmd_printf(
+	settings_get_copy(&c);
+	k_mutex_lock(&cfg_get_mutex, K_FOREVER);
+
+	snprintf(out, sizeof(out),
 		"$CFG:FOD=%d,SOD=%d,ACD=%d,CFD=%d"
 		",KP=%.4f,KI=%.4f,KD=%.4f"
 		",MSP=%d,XSP=%d,BSP=%d"
-		",MNP=%d,XNP=%d,NTP=%d",
+		",MNP=%d,XNP=%d,NTP=%d"
+		",ENH=%d,WDM=%.4f,LMS=%d"
+		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d,CKU=%d"
+		",COE1=%.2f,COE2=%.2f"
+		",WDD=%.1f,RCW=%d,WDT=%d,WMT=%d,WST=%.1f,STK=%d,STL=%d"
+		",RBC=%d,RDC=%d,RBM=%d,RDM=%d,LBM=%d,LDM=%d,LFS=%.2f,LFM=%d"
+		",BSM=%d,BPS=%d,BFS=%.2f,BFM=%d"
+		",IMR=%d,SVR=%d,CAL=%d"
+		",BEN=%d,BML=%.4f,BLV=%.1f"
+		",TGF=%d"
+		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=%s\n",
 		c.front_obstacle_dist, c.side_open_dist,
 		c.all_close_dist, c.close_front_dist,
 		(double)c.pid_kp, (double)c.pid_ki, (double)c.pid_kd,
 		c.min_speed, c.max_speed, c.min_bspeed,
-		c.min_point, c.max_point, c.neutral_point);
-
-	/* Chunk 2: tachometer + speed + navigation */
-	wifi_cmd_printf(
-		",ENH=%d,WDM=%.4f,LMS=%d"
-		",SPD1=%.1f,SPD2=%.1f,SLW=%.2f,KOP=%.1f,KOM=%d"
-		",COE1=%.2f,COE2=%.2f"
-		",WDD=%.1f,RCW=%d,STK=%d,STL=%d",
+		c.min_point, c.max_point, c.neutral_point,
 		c.encoder_holes, (double)c.wheel_diam_m, c.loop_ms,
 		(double)c.spd_clear, (double)c.spd_blocked,
 		(double)c.spd_slew,
-		(double)c.kick_pct, c.kick_ms,
+		(double)c.kick_pct, c.kick_ms, c.corner_kick_us,
 		(double)c.coe_clear, (double)c.coe_blocked,
 		(double)c.wrong_dir_deg, c.race_cw ? 1 : 0,
-		c.stuck_thresh, c.stall_thresh);
-
-	/* Chunk 3: flags + system info */
-	wifi_cmd_printf(
-		",IMR=%d,SVR=%d,CAL=%d"
-		",BEN=%d,BML=%.4f,BLV=%.1f"
-		",TGF=%d"
-		",IMU=1,DBG=1,SNS=%d,SMX=%d,FWV=2.0.0\n",
+		c.wrong_detect_mode, c.wrong_maneuver_mode,
+		(double)c.wrong_sensor_thresh,
+		c.stuck_thresh, c.stall_thresh,
+		c.reverse_brake_cmd, c.reverse_drive_cmd,
+		c.reverse_brake_ms, c.reverse_drive_ms,
+		c.long_reverse_brake_ms, c.long_reverse_drive_ms,
+		(double)c.long_forward_speed_cap, c.long_forward_ms,
+		c.burst_stop_ms, c.burst_pre_steer_ms,
+		(double)c.burst_forward_speed, c.burst_forward_ms,
 		c.imu_rotate ? 1 : 0, c.servo_reverse ? 1 : 0,
 		c.calibrated ? 1 : 0,
 		c.bat_enabled ? 1 : 0, (double)c.bat_multiplier,
 		(double)c.bat_low, c.tach_glitch_filter_us,
-		SENSOR_COUNT, MAX_SENSOR_RANGE);
+		SENSOR_COUNT, MAX_SENSOR_RANGE, FW_VERSION_FULL);
+	wifi_cmd_send(out);
+	k_mutex_unlock(&cfg_get_mutex);
 }
 
 /* ─── SET command ─────────────────────────────────────────────────────────── */
@@ -458,24 +599,31 @@ static void cmd_drv(const char *args)
 static void cmd_diag(void)
 {
 	wifi_cmd_printf(
-		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f"
-		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f\n",
+		"$DIAG:SNS=%d,IMU=%d,UP=%lld,BAT=%.2f,BRAW=%.2f,BMIN=%.2f"
+		",RUN=%d,DRV=%d,TAHO=%u,SPD=%.2f,ESC=%d,SNR=%u,I2C=%d,IM=%02X\n",
 		sensors_online_count(),
 		imu_is_ok() ? 1 : 0,
 		k_uptime_get(),
 		(double)battery_get_voltage(),
+		(double)battery_get_raw_voltage(),
+		(double)battery_get_min_voltage(),
 		control_is_running() ? 1 : 0,
 		0, /* drv_enabled is static in control.c */
 		taho_get_count(),
-		(double)taho_get_speed());
+		(double)taho_get_speed(),
+		car_get_esc_us(),
+		(unsigned int)sensors_restart_count(),
+		sensors_i2c_scan_count(),
+		sensors_i2c_scan_mask());
 }
 
 static void cmd_sns(void)
 {
 	int *s = sensors_poll();
-	wifi_cmd_printf("$SNS:%d,%d,%d,%d,%d,%d,online=%d\n",
+	wifi_cmd_printf("$SNS:%d,%d,%d,%d,%d,%d,online=%d,restarts=%u\n",
 			s[0], s[1], s[2], s[3], s[4], s[5],
-			sensors_online_count());
+			sensors_online_count(),
+			(unsigned int)sensors_restart_count());
 }
 
 static void cmd_imu(void)
@@ -493,12 +641,13 @@ static void cmd_pid(void)
 	settings_get_copy(&c);
 
 	wifi_cmd_printf("$PID:KP=%.4f,KI=%.4f,KD=%.4f"
-			",SPD=%.2f,TAHO=%u,TSPD=%.2f\n",
+			",SPD=%.2f,TAHO=%u,TSPD=%.2f,ESC=%d\n",
 			(double)c.pid_kp, (double)c.pid_ki,
 			(double)c.pid_kd,
 			(double)taho_get_speed(),
 			taho_get_count(),
-			(double)taho_get_speed());
+			(double)taho_get_speed(),
+			car_get_esc_us());
 }
 
 static void cmd_sys(void)
@@ -513,7 +662,33 @@ static void cmd_sys(void)
 			(double)battery_get_voltage(),
 			c.min_point, c.max_point, c.neutral_point,
 			c.loop_ms,
-			sensors_online_count());
+		sensors_online_count());
+}
+
+static void cmd_enc(void)
+{
+	int clk = 0;
+	int dt = 0;
+	int sw = 0;
+	int rot = 0;
+	int trans = 0;
+	int invalid = 0;
+	int same = 0;
+	int synth = 0;
+	int accum = 0;
+	int states[4] = {0};
+	bool ok = encoder_get_debug(&clk, &dt, &sw, &rot,
+				     &trans, &invalid, &same, &synth, &accum, states);
+	wifi_cmd_printf("$ENC:ok=%d,CLK=%d,DT=%d,SW=%d,ROT=%d,TR=%d,INV=%d,SAME=%d,SYN=%d,ACC=%d,S=%d/%d/%d/%d\n",
+		ok ? 1 : 0, clk, dt, sw, rot, trans, invalid, same, synth, accum,
+		states[0], states[1], states[2], states[3]);
+}
+
+static void cmd_dsp(void)
+{
+	wifi_cmd_printf("$DSP:present=%d,errors=%u\n",
+		display_hal_is_present() ? 1 : 0,
+		(unsigned int)display_hal_error_count());
 }
 
 static void cmd_help(void)
@@ -524,10 +699,10 @@ static void cmd_help(void)
 		"$L: $START $STOP $MONITOR $STATUS $BAT\n"
 		"$L: $DRV:<steer>,<speed> $DRVEN $DRVOFF\n"
 		"$L: $SRV:<angle> $ESC:<us>\n"
+		"$L: $BEEP or $BEEP:<freq>,<ms>\n"
 		"$L: $TEST:<name> (lidar,servo,taho,esc,speed,autotune,reactive,cal)\n"
-		"$L: $TRK:<cmd> (START,STOP,RACE,STATUS,CLEAR)\n"
 		"$L: --- Debug ---\n"
-		"$L: $DIAG $SNS $IMU $PID $SYS $HELP\n"
+		"$L: $DIAG $SNS $IMU $PID $SYS $ENC $DSP $HELP\n"
 		"$L: $LOG:ON $LOG:OFF (toggle debug log forwarding)\n"
 	);
 }
@@ -578,6 +753,19 @@ static void dispatch_command(const char *line)
 		control_cmd_stop();
 	} else if (strcmp(line, "$MONITOR") == 0) {
 		control_cmd_monitor();
+	} else if (strcmp(line, "$RECOVER") == 0) {
+		wifi_cmd_send("$T:SNS,phase=manual_recovery_start\n");
+		bool ok = sensors_recover_all();
+		wifi_cmd_printf("$T:SNS,phase=manual_recovery_done,ok=%d,online=%d,restarts=%u\n",
+			ok ? 1 : 0,
+			sensors_online_count(),
+			(unsigned int)sensors_restart_count());
+	} else if (strcmp(line, "$I2C") == 0) {
+		uint8_t mask = sensors_i2c_scan_mask();
+		wifi_cmd_printf("$I2C:VL53=%d,MASK=%02X,ADDRS=30-35,DEF29=%d\n",
+			POPCOUNT(mask & 0x3f),
+			mask,
+			(mask & BIT(6)) ? 1 : 0);
 	} else if (strcmp(line, "$STATUS") == 0) {
 		wifi_cmd_printf("$STS:%s\n",
 			control_is_running() ? "RUN" :
@@ -585,6 +773,24 @@ static void dispatch_command(const char *line)
 			control_is_monitor() ? "MONITOR" : "STOP");
 	} else if (strcmp(line, "$BAT") == 0) {
 		wifi_cmd_printf("$BAT:%.2f\n", (double)battery_get_voltage());
+	} else if (strcmp(line, "$BEEP") == 0) {
+		buzzer_play(BUZZER_BOOT_READY);
+		wifi_cmd_send("$ACK\n");
+	} else if (strncmp(line, "$BEEP:", 6) == 0) {
+		int freq = 0;
+		int ms = 0;
+		if (sscanf(line + 6, "%d,%d", &freq, &ms) == 2) {
+			buzzer_beep(CLAMP(freq, 100, 5000), CLAMP(ms, 10, 2000));
+			wifi_cmd_send("$ACK\n");
+		} else {
+			wifi_cmd_send("$NAK:bad_beep\n");
+		}
+	} else if (strcmp(line, "$PWR") == 0) {
+		wifi_cmd_printf("$PWR:BAT=%.2f,RAW=%.2f,MIN=%.2f,ESC=%d\n",
+			(double)battery_get_voltage(),
+			(double)battery_get_raw_voltage(),
+			(double)battery_get_min_voltage(),
+			car_get_esc_us());
 	} else if (strncmp(line, "$TEST:", 6) == 0) {
 		if (!queue_async_test(line + 6)) {
 			wifi_cmd_send("$NAK:busy\n");
@@ -605,8 +811,6 @@ static void dispatch_command(const char *line)
 		car_write_steer(0);
 		car_write_speed(0);
 		wifi_cmd_send("$ACK\n");
-	} else if (strncmp(line, "$TRK:", 5) == 0) {
-		track_learn_dispatch(line + 5);
 	/* ── Debug console ─────────────────────────────────────── */
 	} else if (strcmp(line, "$DIAG") == 0) {
 		cmd_diag();
@@ -618,6 +822,10 @@ static void dispatch_command(const char *line)
 		cmd_pid();
 	} else if (strcmp(line, "$SYS") == 0) {
 		cmd_sys();
+	} else if (strcmp(line, "$ENC") == 0) {
+		cmd_enc();
+	} else if (strcmp(line, "$DSP") == 0) {
+		cmd_dsp();
 	} else if (strcmp(line, "$HELP") == 0) {
 		cmd_help();
 	} else if (strcmp(line, "$LOG:ON") == 0) {
@@ -654,7 +862,11 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 	};
 
 	while (1) {
-		k_poll(poll_events, 2, K_FOREVER);
+		int poll_ret = k_poll(poll_events, 2, K_SECONDS(10));
+		if (poll_ret == -EAGAIN) {
+			wifi_cmd_send("#WIFISTATUS\n");
+			continue;
+		}
 
 		/* Reset poll event states */
 		poll_events[0].state = K_POLL_STATE_NOT_READY;
@@ -669,6 +881,9 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 						cmd_buf[cmd_len] = '\0';
 						if (cmd_buf[0] == '$') {
 							dispatch_command(cmd_buf);
+						} else if (cmd_buf[0] == '#' && cmd_len >= 2 &&
+							   cmd_buf[1] == ' ') {
+							parse_wifi_status_line(cmd_buf);
 						}
 						cmd_len = 0;
 					}
@@ -696,6 +911,18 @@ static void wifi_cmd_thread(void *p1, void *p2, void *p3)
 				settings_reset();
 				sync_tach_glitch_filter();
 				wifi_cmd_send("$ACK\n");
+				break;
+			case MCMD_SNS_RECOVER:
+				control_cmd_stop();
+				wifi_cmd_send("$T:SNS,phase=manual_recovery_start\n");
+				{
+					bool ok = sensors_recover_all();
+					wifi_cmd_printf("$T:SNS,phase=manual_recovery_done,ok=%d,online=%d,restarts=%u\n",
+							ok ? 1 : 0,
+							sensors_online_count(),
+							(unsigned int)sensors_restart_count());
+					buzzer_play(ok ? BUZZER_CAL_DONE : BUZZER_ERROR);
+				}
 				break;
 			default:
 				if (mcmd >= MCMD_TEST_BASE && mcmd < MCMD_TEST_BASE + 8) {
@@ -729,14 +956,36 @@ void wifi_cmd_init(void)
 	k_thread_create(&wifi_thread_data, wifi_stack,
 			K_THREAD_STACK_SIZEOF(wifi_stack),
 			wifi_cmd_thread, NULL, NULL, NULL,
-			WIFI_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_WIFI_CMD_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_thread_data, "wifi_cmd");
 
 	k_thread_create(&wifi_async_thread_data, wifi_async_stack,
 			K_THREAD_STACK_SIZEOF(wifi_async_stack),
 			wifi_async_thread, NULL, NULL, NULL,
-			WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_WIFI_ASYNC_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&wifi_async_thread_data, "wifi_async");
 
-	LOG_INF("WiFi CMD init (UART1 GP4/GP5, 115200)");
+#if IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD)
+	debug_uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+	if (!device_is_ready(debug_uart_dev)) {
+		LOG_WRN("UART0 debug command RX not ready");
+		debug_uart_dev = NULL;
+	} else {
+		k_thread_create(&debug_uart_thread_data, debug_uart_stack,
+				K_THREAD_STACK_SIZEOF(debug_uart_stack),
+				debug_uart_thread, NULL, NULL, NULL,
+				CONFIG_APP_DEBUG_UART_PRIORITY, 0, K_NO_WAIT);
+		k_thread_name_set(&debug_uart_thread_data, "debug_uart_cmd");
+	}
+#endif
+
+	LOG_INF("WiFi CMD init (UART1 GP4/GP5%s)",
+		IS_ENABLED(CONFIG_APP_DEBUG_UART_CMD) ? " + UART0 debug" : "");
 }
+
+bool        wifi_status_is_ready(void)    { return ws_ready; }
+bool        wifi_status_is_ap(void)       { return ws_is_ap; }
+int         wifi_status_get_rssi(void)    { return ws_rssi; }
+const char *wifi_status_get_ssid(void)    { return ws_ssid; }
+const char *wifi_status_get_ip(void)      { return ws_ip; }
+const char *wifi_status_get_ap_pass(void) { return ws_ap_pass; }

@@ -117,8 +117,10 @@ apt install -y \
     wget curl ccache device-tree-compiler dfu-util \
     build-essential pkg-config libusb-1.0-0-dev \
     gcc-multilib g++-multilib \
-    picocom usbutils
+    picocom usbutils python3-pil
 ```
+
+`python3-pil` (Pillow) нужен для job-а `check-ui` — рендеринг дисплея и проверка на pixel-overlap. Альтернатива: `pip install pillow` (CI-workflow делает это сам через `pip install --quiet pillow`).
 
 `gcc-multilib` / `g++-multilib` нужны для **native_sim** (ztest в CI собирается с `-m32`); без них ошибка `bits/libc-header-start.h: No such file or directory`.
 
@@ -312,14 +314,17 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
 
 ---
 
-## Часть 4: Workflow для self-hosted runner
+## Часть 4: Workflow
 
-- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) — `runs-on: [self-hosted, linux, embedded]`, сборка из `~/zephyrproject` (§3.5).
+- **umbreon_zephyr:** [`.github/workflows/build.yml`](../.github/workflows/build.yml) теперь запускается на GitHub-hosted `ubuntu-latest`; Zephyr workspace поднимается через `west init -l app`.
+  - `check-ui` — параллельный job, запускает `tools/sim_dashboard.py` (Pillow), загружает `sim_dashboard.png` как артефакт. Не блокирует сборку.
+  - `build` — сборка прошивки, загружает `zephyr.uf2`.
+  - `test-host` — host unit-тесты (gcc, без Zephyr).
+  - `test-ztest` — Zephyr ztest на `native_sim`.
 - **umbreon_esp_web:** [`umbreon_esp_web/.github/workflows/build.yml`](../../umbreon_esp_web/.github/workflows/build.yml) — тот же `runs-on`, `~/ESP8266_RTOS_SDK` (§3.6).
 - **Umbreon_roborace:** [`Umbreon_roborace/.github/workflows/ci.yml`](../../Umbreon_roborace/.github/workflows/ci.yml) — Arduino/Python/Docker; см. [`Umbreon_roborace/docs/self-hosted-ci.md`](../../Umbreon_roborace/docs/self-hosted-ci.md).
-- **Резервная копия облачного Zephyr CI:** [`docs/ci-backup/build.cloud.yml`](ci-backup/build.cloud.yml).
 
-У раннера в `config.sh` / настройках GitHub должны быть те же labels: `self-hosted`, `linux`, `embedded`.
+Self-hosted runner больше не нужен для обычного CI. Он остаётся полезным для HIL, прошивки через OpenOCD и smoke-тестов на реальном железе. Для таких jobs у раннера в `config.sh` / настройках GitHub должны быть labels: `self-hosted`, `linux`, `embedded`.
 
 ### Опционально: HIL (прошивка + smoke по UART)
 
@@ -336,7 +341,7 @@ sudo -u runner -H bash -c 'cd /home/runner/actions-runner-esp-web && ./svc.sh in
         run: |
           openocd -f interface/stlink.cfg -f target/rp2350.cfg \
             -c "adapter speed 5000" \
-            -c "program ${HOME}/zephyrproject/build/zephyr/zephyr.elf verify reset exit"
+            -c "program ${GITHUB_WORKSPACE}/build/zephyr/zephyr.elf verify reset exit"
 
       - name: Smoke test (UART)
         run: |
@@ -429,6 +434,8 @@ pip install -r zephyr/scripts/requirements.txt
 - [ ] Runner online: GitHub → Settings → Actions → Runners (зелёный кружок)
 - [ ] Zephyr: `~/zephyrproject/.venv`, `west --version`, сборка `umbreon_zephyr` проходит в Actions
 - [ ] ESP8266: `~/ESP8266_RTOS_SDK`, после `export.sh` — `make all` в клоне `umbreon_esp_web`
+- [ ] Pillow: `python3 -c "import PIL; print(PIL.__version__)"` — нужен для `check-ui` job
+- [ ] check-ui: `make check-ui` — должен завершиться с exit 0 и создать `tools/sim_dashboard.png`
 - [ ] (Опционально HIL) ST-Link: `lsusb | grep 0483` внутри контейнера
 - [ ] (Опционально HIL) OpenOCD: `openocd -f interface/stlink.cfg -f target/rp2350.cfg -c "init; exit"`
 - [ ] (Опционально HIL) `west flash`, UART `picocom /dev/ttyUSB0 -b 115200`

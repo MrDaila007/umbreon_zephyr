@@ -29,6 +29,7 @@ LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 static const struct device *mpu_dev;
 static bool mpu_ok;
 static float gyro_bias;
+static float accel_bias[3]; /* [0]=X, [1]=Y, [2]=Z — m/s² */
 static float yaw_rate;
 static float heading;
 static int64_t prev_us;
@@ -42,14 +43,6 @@ void imu_init(void)
 		LOG_WRN("MPU-6050 not ready");
 		mpu_ok = false;
 		return;
-	}
-
-	/* Set gyro full-scale to ±500°/s */
-	struct sensor_value fs = { .val1 = 500, .val2 = 0 };
-	int rc = sensor_attr_set(mpu_dev, SENSOR_CHAN_GYRO_Z,
-				 SENSOR_ATTR_FULL_SCALE, &fs);
-	if (rc) {
-		LOG_WRN("MPU-6050 gyro FS set failed: %d (using driver default)", rc);
 	}
 
 	mpu_ok = true;
@@ -100,6 +93,62 @@ void imu_calibrate(void)
 	}
 
 	LOG_INF("IMU: bias = %.3f deg/s (%d samples)", (double)gyro_bias, count);
+}
+
+/* Measures average accel XYZ and stores to accel_bias[]. Currently informational
+ * only — the bias is not applied in imu_update() since accel is not used in control. */
+void imu_calibrate_accel(void)
+{
+	if (!mpu_ok) {
+		return;
+	}
+
+	LOG_INF("IMU: calibrating accel bias (~1s, keep still)...");
+
+	float sum[3] = {0};
+	int count = 0;
+
+	for (int i = 0; i < CAL_SAMPLES; i++) {
+		if (sensor_sample_fetch(mpu_dev) != 0) {
+			k_msleep(CAL_DELAY_MS);
+			continue;
+		}
+		struct sensor_value val[3];
+		if (sensor_channel_get(mpu_dev, SENSOR_CHAN_ACCEL_XYZ, val) != 0) {
+			k_msleep(CAL_DELAY_MS);
+			continue;
+		}
+		sum[0] += sensor_value_to_float(&val[0]);
+		sum[1] += sensor_value_to_float(&val[1]);
+		sum[2] += sensor_value_to_float(&val[2]);
+		count++;
+		k_msleep(CAL_DELAY_MS);
+	}
+
+	if (count > 0) {
+		accel_bias[0] = sum[0] / count;
+		accel_bias[1] = sum[1] / count;
+		accel_bias[2] = sum[2] / count;
+	} else {
+		LOG_WRN("IMU: accel cal failed — no samples, bias unchanged");
+		return;
+	}
+
+	LOG_INF("IMU: accel bias = (%.3f, %.3f, %.3f) m/s² (%d samples)",
+		(double)accel_bias[0], (double)accel_bias[1],
+		(double)accel_bias[2], count);
+}
+
+float imu_get_gyro_bias(void)
+{
+	return gyro_bias;
+}
+
+void imu_get_accel_bias(float *x, float *y, float *z)
+{
+	*x = accel_bias[0];
+	*y = accel_bias[1];
+	*z = accel_bias[2];
 }
 
 /* ─── Update ──────────────────────────────────────────────────────────────── */

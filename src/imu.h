@@ -17,6 +17,13 @@ void imu_update(void);
 /* Reset accumulated heading to zero */
 void imu_reset_heading(void);
 
+/* Calibrate accelerometer: average CAL_SAMPLES reads of all axes, store bias */
+void  imu_calibrate_accel(void);
+
+/* Expose calibration results for display */
+float imu_get_gyro_bias(void);
+void  imu_get_accel_bias(float *x, float *y, float *z);
+
 /* ─── Accessors ───────────────────────────────────────────────────────────── */
 bool imu_is_ok(void);
 float imu_get_yaw_rate(void);   /* filtered yaw rate (°/s) */

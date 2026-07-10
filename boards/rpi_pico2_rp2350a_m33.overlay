@@ -2,13 +2,14 @@
  * Devicetree overlay for Umbreon roborace car — Raspberry Pi Pico 2 (RP2350A)
  *
  * Pin assignment:
- *   I2C0  GP0/GP1  400kHz — MPU-6050 (0x68)
+ *   I2C0  GP0/GP1  400kHz — MPU-6050 (0x68) + SSD1306 OLED (0x3C)
  *   I2C1  GP2/GP3  100kHz — 6× VL53L0X (0x30–0x35)
  *   UART0 GP16/GP17 115200 — Debug console
  *   UART1 GP4/GP5   115200 — WiFi bridge (ESP8266)
  *   PWM   GP10 (slice 5A) — Steering servo
  *   PWM   GP11 (slice 5B) — Motor ESC
  *   GPIO  GP13 — Tachometer interrupt (RISING)
+ *   GPIO  GP18 — Piezo buzzer
  *   ADC   GP26 (ch0) — Battery voltage
  *   GPIO  GP6,7,8,9,14,15 — VL53L0X XSHUT pins
  */
@@ -41,45 +42,28 @@
 		};
 	};
 
-	/* ─── Bit-bang I2C for SSD1306 OLED (GP18=SDA, GP20=SCL) ──────────── */
-	i2c_oled: i2c-oled {
-		compatible = "gpio-i2c";
-		sda-gpios = <&gpio0 18 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
-		scl-gpios = <&gpio0 20 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
-		clock-frequency = <100000>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		status = "okay";
-
-		ssd1306: ssd1306@3c {
-			compatible = "solomon,ssd1306fb";
-			reg = <0x3c>;
-			width = <128>;
-			height = <64>;
-			segment-offset = <0>;
-			page-offset = <0>;
-			display-offset = <0>;
-			multiplex-ratio = <63>;
-			segment-remap;
-			com-invdir;
-			prechargep = <0x22>;
-			ready-time-ms = <200>;
-		};
-	};
 
 	encoder {
 		compatible = "gpio-keys";
 		enc_a: enc_clk {
-			gpios = <&gpio0 22 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 22 0>;
 			label = "Encoder CLK";
 		};
 		enc_b: enc_dt {
-			gpios = <&gpio0 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 12 0>;
 			label = "Encoder DT";
 		};
 		enc_sw: enc_btn {
-			gpios = <&gpio0 19 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpio0 19 GPIO_ACTIVE_LOW>;
 			label = "Encoder Button";
+		};
+	};
+
+	buzzer {
+		compatible = "gpio-leds";
+		buzzer_pin: buzzer {
+			gpios = <&gpio0 18 GPIO_ACTIVE_HIGH>;
+			label = "Piezo buzzer";
 		};
 	};
 };
@@ -137,7 +121,7 @@
 	};
 };
 
-/* ─── I2C0: MPU-6050 gyroscope ───────────────────────────────────────────── */
+/* ─── I2C0: MPU-6050 (0x68) + SSD1306 OLED (0x3C) ───────────────────────── */
 &i2c0 {
 	status = "okay";
 	clock-frequency = <I2C_BITRATE_FAST>;
@@ -145,10 +129,28 @@
 	mpu6050: mpu6050@68 {
 		compatible = "invensense,mpu6050";
 		reg = <0x68>;
+		gyro-fs = <500>;
 		status = "okay";
 	};
 
-	/* SSD1306 moved to dedicated i2c-gpio bus (i2c_oled) */
+	/* SSD1306 node disabled — u8g2 communicates directly via I2C, bypassing
+	 * the Zephyr display subsystem. I2C address 0x3C is still used by u8g2
+	 * HAL callbacks. Do not re-enable without removing CONFIG_U8G2=y. */
+	ssd1306: ssd1306@3c {
+		compatible = "solomon,ssd1306";
+		reg = <0x3c>;
+		width = <128>;
+		height = <64>;
+		segment-offset = <0>;
+		page-offset = <0>;
+		display-offset = <0>;
+		multiplex-ratio = <63>;
+		segment-remap;
+		com-invdir;
+		prechargep = <0x22>;
+		ready-time-ms = <200>;
+		status = "disabled";
+	};
 };
 
 /* ─── I2C1: 6× VL53L0X ToF sensors ──────────────────────────────────────── */

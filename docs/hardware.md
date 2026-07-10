@@ -9,31 +9,45 @@ Only core 0 is used — Zephyr runs on the M33 target `rpi_pico2/rp2350a/m33`.
 
 | GPIO | Function | Notes |
 |------|----------|-------|
-| GP0 | I2C0 SDA | MPU-6050 IMU |
+| GP0 | I2C0 SDA | MPU-6050 IMU + SSD1306 OLED |
 | GP1 | I2C0 SCL | 400 kHz |
 | GP2 | I2C1 SDA | 6× VL53L0X ToF |
 | GP3 | I2C1 SCL | 100 kHz |
+| GP4 | UART1 TX | ESP8266 WiFi bridge |
+| GP5 | UART1 RX | ESP8266 WiFi bridge |
 | GP6 | XSHUT sensor 0 | Hard-Right |
 | GP7 | XSHUT sensor 1 | Front-Right |
 | GP8 | XSHUT sensor 2 | Right |
 | GP9 | XSHUT sensor 3 | Left |
 | GP10 | PWM5A — Servo | Steering, 50 Hz |
 | GP11 | PWM5B — ESC | Motor, 50 Hz |
+| GP12 | GPIO | Menu encoder DT, pull-up, active low |
 | GP13 | Tachometer | Rising-edge IRQ |
 | GP14 | XSHUT sensor 4 | Front-Left |
 | GP15 | XSHUT sensor 5 | Hard-Left |
-| GP16 | UART0 TX | ESP8266 WiFi bridge |
-| GP17 | UART0 RX | ESP8266 WiFi bridge |
+| GP16 | UART0 TX | Debug console |
+| GP17 | UART0 RX | Debug console |
+| GP18 | GPIO | Piezo buzzer |
+| GP19 | GPIO | Menu encoder button, pull-up, active low |
+| GP20 | GPIO | Unused |
+| GP22 | GPIO | Menu encoder CLK, pull-up, active low |
 | GP26 | ADC ch0 | Battery (18 kΩ / 10 kΩ divider) |
 
 ## Sensor Layout (top-down view)
 
-```
-           REAR
-   [0:HR]        [5:HL]
-       [1:FR]  [4:FL]
-       [2:R]   [3:L]
-         ── FRONT ──
+```text
+             REAR / rear
+
+      [0 HR]           [5 HL]
+      Hard-Right       Hard-Left
+
+          [1 FR]   [4 FL]
+          Front-R  Front-L
+
+          [2 R]    [3 L]
+          Right    Left
+
+            FRONT / front
 ```
 
 Indices match the XSHUT power-on sequence and devicetree order.
@@ -46,12 +60,27 @@ Indices match the XSHUT power-on sequence and devicetree order.
 - Range: 30–2000 mm (values above 8190 mm treated as out-of-range)
 - Internal units: mm (same scale as cm×10)
 
+| Index | Position | I2C address | XSHUT |
+|------:|----------|------------:|-------|
+| 0 | Hard-Right | `0x30` | GP6 |
+| 1 | Front-Right | `0x31` | GP7 |
+| 2 | Right | `0x32` | GP8 |
+| 3 | Left | `0x33` | GP9 |
+| 4 | Front-Left | `0x34` | GP14 |
+| 5 | Hard-Left | `0x35` | GP15 |
+
 ## MPU-6050 IMU
 
 - I2C0 at 400 kHz, address 0x68
 - Only gyroscope Z-axis is used (yaw rate)
 - Full-scale range: ±500°/s
 - Calibration: 200 samples at 5 ms intervals on startup
+
+## SSD1306 OLED
+
+- I2C0 at 400 kHz, address 0x3C
+- Shares the I2C0 bus with the MPU-6050
+- u8g2 owns the display directly; Zephyr display subsystem is disabled
 
 ## Servo (Steering)
 
@@ -84,9 +113,21 @@ Indices match the XSHUT power-on sequence and devicetree order.
 - ADC: 12-bit, 3.3 V reference
 - Low-voltage cutoff: 6.0 V (configurable, 10 s sustained)
 
+## Piezo Buzzer
+
+- Connected to GP18 and GND
+- Driven as a GPIO square wave by the `buzzer` thread
+- Boot ready, RUN start, STOP, and ESC calibration completion have short sound cues
+
 ## ESP8266 WiFi Bridge
 
-- Connected via UART0 at 115200 baud
+- Connected via UART1 at 115200 baud
+- TX on GP4, RX on GP5
 - Acts as transparent serial-to-WiFi bridge
 - No AT commands — firmware on ESP handles TCP/WiFi
 - All robot commands and telemetry pass through this link
+
+## Debug Console
+
+- Connected via UART0 at 115200 baud
+- TX on GP16, RX on GP17

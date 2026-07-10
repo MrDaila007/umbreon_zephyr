@@ -1,0 +1,5 @@
+name: u8g2_zephyr
+
+build:
+  cmake: .
+  kconfig: Kconfig

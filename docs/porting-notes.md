@@ -77,8 +77,8 @@ Conversion: `mm = val1 * 1000 + val2 / 1000`.
 The Arduino library returned millimeters directly.
 
 ### UART Numbering
-On RP2350, GP16/GP17 map to **UART0** (not UART1 as in arduino-pico).
-The devicetree overlay configures `&uart0` with these pins.
+On RP2350, GP16/GP17 map to **UART0** and GP4/GP5 map to **UART1**.
+The devicetree overlay uses UART0 for the debug console and UART1 for the ESP8266 WiFi bridge.
 
 ### Flash Storage
 Arduino used EEPROM emulation (LittleFS-backed).
@@ -120,5 +120,5 @@ These are applied automatically by `./setup_zephyr.sh --version v4.1.0`.
 
 ### Kconfig notes
 - `CONFIG_FPU=y` is not needed — RP2350 M33 doesn't declare `CPU_HAS_FPU` in v4.1
-- `CONFIG_CONSOLE=n` and `CONFIG_UART_CONSOLE=n` — UART0 is used for WiFi, not console
+- `CONFIG_CONSOLE=y` and `CONFIG_UART_CONSOLE=y` — UART0 is the debug console; WiFi uses UART1
 - `CONFIG_FLASH_MAP=y` — required for NVS flash area API

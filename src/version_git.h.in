@@ -1,0 +1,5 @@
+#pragma once
+
+#define FW_GIT_HASH "@FW_GIT_HASH@"
+#define FW_COMMIT_SUBJECT "@FW_COMMIT_SUBJECT@"
+#define FW_BUILD_LABEL "@FW_BUILD_LABEL@"

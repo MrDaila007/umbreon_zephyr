@@ -2,7 +2,7 @@
  * battery.c — Battery voltage monitoring via ADC
  *
  * ADC ch0 (GP26), 12-bit, resistor divider R1=18k / R2=10k (multiplier 2.8)
- * Runs in its own low-priority thread, reading every 500ms.
+ * Runs in its own low-priority thread, sampling at CONFIG_APP_BATTERY_SAMPLE_INTERVAL_MS.
  *
  * Port of Car::bat_update() from luna_car.h:417-431
  */
@@ -33,14 +33,13 @@ static const struct adc_channel_cfg adc_ch_cfg = {
 };
 
 #define BAT_EMA 0.05f
-
 /* ─── State ───────────────────────────────────────────────────────────────── */
 static volatile float bat_voltage;
+static volatile float bat_raw_voltage;
+static volatile float bat_min_voltage;
 
 /* ─── Thread config ───────────────────────────────────────────────────────── */
-#define BAT_STACK_SIZE 1024
-#define BAT_PRIORITY   10
-static K_THREAD_STACK_DEFINE(bat_stack, BAT_STACK_SIZE);
+static K_THREAD_STACK_DEFINE(bat_stack, CONFIG_APP_BATTERY_STACK_SIZE);
 static struct k_thread bat_thread_data;
 
 /* ─── Battery thread ──────────────────────────────────────────────────────── */
@@ -60,7 +59,7 @@ static void battery_thread(void *p1, void *p2, void *p3)
 	};
 
 	while (1) {
-		k_msleep(500);
+		k_msleep(CONFIG_APP_BATTERY_SAMPLE_INTERVAL_MS);
 
 		struct car_settings c;
 		settings_get_copy(&c);
@@ -76,6 +75,10 @@ static void battery_thread(void *p1, void *p2, void *p3)
 
 		float v_adc = (float)sample_buf * (3.3f / 4095.0f);
 		float v_bat = v_adc * c.bat_multiplier;
+		bat_raw_voltage = v_bat;
+		if (bat_min_voltage < 0.1f || v_bat < bat_min_voltage) {
+			bat_min_voltage = v_bat;
+		}
 
 		/* EMA filter */
 		if (bat_voltage < 0.1f) {
@@ -107,7 +110,7 @@ void battery_init(void)
 	k_thread_create(&bat_thread_data, bat_stack,
 			K_THREAD_STACK_SIZEOF(bat_stack),
 			battery_thread, NULL, NULL, NULL,
-			BAT_PRIORITY, 0, K_NO_WAIT);
+			CONFIG_APP_BATTERY_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&bat_thread_data, "battery");
 
 	LOG_INF("Battery ADC init (GP26, ch0)");
@@ -116,4 +119,14 @@ void battery_init(void)
 float battery_get_voltage(void)
 {
 	return bat_voltage;
+}
+
+float battery_get_raw_voltage(void)
+{
+	return bat_raw_voltage;
+}
+
+float battery_get_min_voltage(void)
+{
+	return bat_min_voltage;
 }

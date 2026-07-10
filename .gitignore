@@ -1,4 +1,7 @@
+# Zephyr west build trees (race, bench, USB, etc.)
 build/
+build-*/
+
 __pycache__/
 *.pyc
 *.o
@@ -6,8 +9,15 @@ __pycache__/
 *.bin
 *.hex
 *.map
+*.uf2
 
 # Host test binaries
 tests/test_unit
 tests/test_maneuver
 tz_web_stall_param.md
+
+# u8g2 source (cloned separately — not tracked in this repo)
+modules/u8g2/
+.claude/
+.vscode/
+docs/superpowers/

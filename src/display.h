@@ -27,5 +27,6 @@ enum menu_cmd {
 	MCMD_SAVE,
 	MCMD_LOAD,
 	MCMD_RESET,
+	MCMD_SNS_RECOVER,
 	MCMD_TEST_BASE = 0x10, /* + test index 0-7 */
 };

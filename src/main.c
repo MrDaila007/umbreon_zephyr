@@ -8,6 +8,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/hwinfo.h>
 
 #if defined(CONFIG_USB_DEVICE_STACK)
 #include <zephyr/usb/usb_device.h>
@@ -22,14 +23,13 @@
 #include "wifi_cmd.h"
 #include "control.h"
 #include "battery.h"
+#include "buzzer.h"
 #include "tests.h"
-#include "track_learn.h"
 #include "encoder.h"
 #include "display.h"
+#include "version.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
-#define FW_VERSION "2.0.0"
 
 /* ─── Watchdog ──────────────────────────────────────────────────────────────── */
 #include <zephyr/drivers/watchdog.h>
@@ -123,8 +123,13 @@ int main(void)
 
 	printk("\n");
 	printk("==============================\n");
-	printk("  Umbreon Zephyr v%s\n", FW_VERSION);
+	printk("  Umbreon Zephyr v%s\n", FW_VERSION_FULL);
 	printk("==============================\n");
+
+	/* Read reset reason early; report it after WiFi is up */
+	uint32_t reset_cause = 0;
+	hwinfo_get_reset_cause(&reset_cause);
+	hwinfo_clear_reset_cause();
 
 	/* Load saved settings (falls back to compile-time defaults) */
 	settings_init();
@@ -142,15 +147,24 @@ int main(void)
 	imu_calibrate();     /* ~1 sec */
 	wdt_feed_kick();
 	battery_init();
+	buzzer_init();
 	wifi_cmd_init();
-	track_learn_init();
 	encoder_init();
 	display_init();
 
 	/* Send boot status via WiFi */
 	k_msleep(200); /* Let ESP boot */
-	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s\n",
-			sensors_online_count(), FW_VERSION);
+
+	const char *reset_str = "UNK";
+	if (reset_cause & RESET_WATCHDOG) reset_str = "WDT";
+	else if (reset_cause & RESET_BROWNOUT) reset_str = "BROWNOUT";
+	else if (reset_cause & RESET_SOFTWARE) reset_str = "SW";
+	else if (reset_cause & RESET_PIN)      reset_str = "PIN";
+	else if (reset_cause & RESET_POR)      reset_str = "POR";
+
+	wifi_cmd_printf("$BOOT:SNS=%d,FW=%s,RST=%s,SUBJ=%s\n",
+			sensors_online_count(), FW_VERSION_FULL, reset_str,
+			FW_COMMIT_SUBJECT);
 
 	/* ESC calibration on first boot */
 	wdt_feed_kick();
@@ -166,6 +180,7 @@ int main(void)
 
 	/* Signal startup complete */
 	blink_led(3, 100);
+	buzzer_play(BUZZER_BOOT_READY);
 
 	wifi_cmd_printf("$BOOT:READY,UP=%lld\n", k_uptime_get());
 
